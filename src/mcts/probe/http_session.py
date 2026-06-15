@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from typing import Any
 
 from mcts.mcp.models import MCPPrompt, MCPResource, MCPServerInfo, MCPTool
@@ -31,22 +32,23 @@ async def probe_remote(config: RemoteServerConfig, timeout_seconds: int = 120) -
     connect_timeout = min(timeout_seconds, 30)
 
     try:
-        if transport in ("sse", "http-sse"):
-            from mcp.client.sse import sse_client
-
-            client_ctx = sse_client(config.url, headers=headers)
-            transport_label = "sse-live"
-        elif transport in ("streamable-http", "http", "streamable_http"):
-            from mcp.client.streamable_http import streamable_http_client
-
-            client_ctx = streamable_http_client(config.url, headers=headers)
-            transport_label = "streamable-http-live"
-        else:
-            raise MCPProbeError(f"Unsupported remote transport: {config.transport}")
-
         async with asyncio.timeout(connect_timeout):
-            async with client_ctx as (read, write, *_):
-                async with ClientSession(read, write) as session:
+            async with AsyncExitStack() as stack:
+                if transport in ("sse", "http-sse"):
+                    from mcp.client.sse import sse_client
+
+                    client_ctx = sse_client(config.url, headers=headers)
+                    transport_label = "sse-live"
+                elif transport in ("streamable-http", "http", "streamable_http"):
+                    from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+                    http_client = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+                    client_ctx = streamable_http_client(config.url, http_client=http_client)
+                    transport_label = "streamable-http-live"
+                else:
+                    raise MCPProbeError(f"Unsupported remote transport: {config.transport}")
+
+                async with client_ctx as (read, write, *_), ClientSession(read, write) as session:
                     init_result = await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
                     discovery_warnings: list[str] = []
                     tools, tools_warning = await _list_tools(session, timeout_seconds)

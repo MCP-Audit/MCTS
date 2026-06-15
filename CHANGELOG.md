@@ -9,7 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Phase 3** — `runtime_evidence.py` tags taint-flow, live-probe, and live-proxy findings; boosts `priority_score` for validated runtime evidence
+- **Fact provenance metrics** — `fact_coverage()` reports `native_pct` / `silver_pct`; dashboard exposes `fact_provenance`; CI gates via `check_ttu_baseline.py` + corpus `--check-only`
+- **Scoring corpus** — `single_tool_overlap` fixture under enforce; Spearman calibration validates without mutating fixtures in CI
+- **Taxonomy display** — MCTS-T-1005 renamed to “Capability Overlap & Attack Paths” (ID unchanged)
+- **Bronze gate (enforce)** — all security findings require `evidence.facts` when trust enforce is on (explicit `--enforce-bronze-facts` still gates warn mode)
+- **Dashboard persona views** — engineer/maintainer default hides compliance rows; compliance persona shows coverage findings only; interpretation pyramid section in evidence panel
+- **Consumer alignment** — pyramid-first `explain_finding`, pentest sort by `priority_score`, protocol probe via `FindingBuilder`, graph rebuild with proven/inferred edge kinds
+- **Phase B3 report collapse** — `summary_basis` on `ScanReport`; unified `summary`/`display_summary` when `collapse_template_severity` + enforce
+- **Attack graph UX** — proven vs inferred edge styling; `cross_tool_flows` and honesty note in dashboard payload
+- **Dashboard JS modules** — bundled `dashboard/core.js` + `dashboard/attack-graph.js` before main app script
+- **Rule stability promotion** — `scripts/promote_rule_stability.py` + corpus overlap recommendations
+- **TTU baseline tooling** — `scripts/baseline_ttu.py` proxy metrics + human study template
+- **Trust release checklist** — `docs/reporting/trust-release-checklist.md` (semver + expert panel gates)
 - **FindingBuilder adoption (complete)** — all analyzer paths emit bronze `evidence.facts` (optional skip rows use `build_skip_finding`)
 - **FindingBuilder adoption (batch 2)** — `attack_chains`, `supply_chain`, `toxic_flows`, `semgrep_adapter` emit bronze `evidence.facts`
 - **Phase B3 opt-in** — `--collapse-template-severity` copies display into template `severity` under enforce
