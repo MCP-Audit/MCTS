@@ -77,3 +77,50 @@ def test_aggressive_requires_fuzz_consent() -> None:
     )
     with pytest.raises(ValueError, match="Aggressive fuzz"):
         FuzzRunner(config).run()
+
+
+def test_fuzz_finding_emits_bronze_facts() -> None:
+    from mcts.fuzz.classifier import ClassifiedResponse, ResponseSignal, finding_from_classification
+    from mcts.fuzz.payloads import FuzzLevel, FuzzProbe
+
+    probe = FuzzProbe(
+        id="malformed-json",
+        title="Malformed JSON",
+        messages=({"jsonrpc": "2.0"},),
+        level=FuzzLevel.SAFE,
+    )
+    classified = ClassifiedResponse(
+        signal=ResponseSignal.STACK_TRACE,
+        severity=Severity.HIGH,
+        summary="Stack trace leaked",
+    )
+    finding = finding_from_classification(probe, classified)
+    facts = (finding.evidence or {}).get("facts")
+    assert isinstance(facts, list) and len(facts) >= 1
+    assert finding.rule_stability == "mature"
+
+
+def test_fuzz_finding_includes_response_excerpt_at_build() -> None:
+    from mcts.fuzz.classifier import ClassifiedResponse, ResponseSignal, finding_from_classification
+    from mcts.fuzz.payloads import FuzzLevel, FuzzProbe
+
+    probe = FuzzProbe(
+        id="malformed-json",
+        title="Malformed JSON",
+        messages=({"jsonrpc": "2.0"},),
+        level=FuzzLevel.SAFE,
+    )
+    classified = ClassifiedResponse(
+        signal=ResponseSignal.STACK_TRACE,
+        severity=Severity.HIGH,
+        summary="Stack trace leaked",
+    )
+    finding = finding_from_classification(
+        probe,
+        classified,
+        response_excerpt="Traceback (most recent call last)",
+        transport="http",
+        remote_url="https://example.test/mcp",
+    )
+    assert finding.evidence.get("response_excerpt") == "Traceback (most recent call last)"
+    assert finding.evidence.get("transport") == "http"

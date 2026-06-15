@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding, build_skip_finding
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
 
@@ -77,30 +78,36 @@ class VulnerablePackageAnalyzer(BaseAnalyzer):
                     continue
                 vid = str(vuln.get("id") or "CVE-UNKNOWN")
                 findings.append(
-                    Finding(
-                        id=f"pip-audit-{name}-{vid}",
+                    build_analyzer_finding(
+                        finding_id=f"pip-audit-{name}-{vid}",
                         analyzer=self.name,
                         title=f"Vulnerable dependency: {name} {version} ({vid})",
                         description=str(vuln.get("description") or vid),
                         severity=Severity.HIGH,
                         recommendation=f"Upgrade {name} to a patched version.",
+                        rule_id="RULE_PIP_AUDIT",
+                        match=vid,
+                        field="dependency_manifest",
                         technique_id="MCTS-T-1014",
                         confidence=0.95,
-                        evidence={"package": name, "version": version, "vuln_id": vid, "file": str(path)},
+                        location=None,
+                        snippet=str(vuln.get("description") or vid)[:200],
+                        extra_evidence={
+                            "package": name,
+                            "version": version,
+                            "vuln_id": vid,
+                            "file": str(path),
+                        },
                     )
                 )
         return findings
 
 
 def _skip_finding(reason: str, recommendation: str) -> Finding:
-    return Finding(
-        id="pip-audit-skipped",
+    return build_skip_finding(
+        finding_id="pip-audit-skipped",
         analyzer="vulnerable_package",
         title="pip-audit scan skipped",
         description=reason,
-        severity=Severity.LOW,
         recommendation=recommendation,
-        technique_id=None,
-        confidence=1.0,
-        evidence={"skipped": True, "reason": reason},
     )

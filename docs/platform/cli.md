@@ -84,10 +84,16 @@ When `-o` is set, format determines serialization. SARIF uses `reporting/sarif.p
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--findings-trust-mode` | `off` | Findings trust layer: `off`, `warn`, or `enforce`. **Enforce** caps overlap chain display severity and aligns gates, score basis, history, and CLI with display severity. **`warn` does not relax CI** — use `enforce` or `--ci-trust`. See [Findings trust Phase 0](../reporting/findings-trust-phase0.md). |
+| `--ci-trust` | off | CI preset: `findings-trust-mode enforce`, `--fail-on-critical`, `--min-score 70`. |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` for this scan (CLI flags only). |
+| `--fail-on-priority-min` | — | **Enforce only.** Exit 1 when `priority_score` ≥ threshold (use with `--min-evidence-strength strong` for Option B). |
+| `--min-evidence-strength` | — | Filter for `--fail-on-priority-min`: `weak`, `moderate`, `strong`, or `verified`. |
 | `--fail-on-critical` | false | Exit **1** if any critical finding |
 | `--min-score` | — | Exit **1** if legacy `score.overall` < N (0–100) |
-| `--max-critical` | — | Exit **1** if critical count > N |
-| `--fail-on-category` | — | Repeatable. Format: `category:limit`. Exit **1** when **legacy** category score ≥ limit |
+| `--max-critical` | — | Exit **1** if critical count > N (enforce: display counts) |
+| `--max-high` | — | Exit **1** if high count > N (enforce: display counts; merges from `.mcts/policy.yaml`) |
+| `--fail-on-category` | — | Repeatable. Format: `category:limit`. **Enforce:** display-aligned legacy tiles; **warn/off:** template |
 | `--scoring` | `both` | `legacy`, `v2`, or `both` — enable multi-factor scoring |
 | `--min-security-score` | — | Exit **1** if v2 benchmark security score < N (requires `--scoring v2` or `both`) |
 | `--max-absolute-risk` | — | Exit **1** if v2 `absolute_risk` > N (requires `--scoring v2` or `both`) |
@@ -286,8 +292,13 @@ Discovered markdown becomes prompt/instruction surfaces for `prompt_injection`, 
 Production readiness checks (separate from security score).
 
 ```bash
-mcts readiness <target> [--output, -o] [--opa] [--llm-judge]
+mcts readiness <target> [--output, -o] [--opa] [--llm-judge] [--findings-trust-mode off|warn|enforce] [--ignore-policy]
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--findings-trust-mode` | `off` | Apply trust validator to readiness notes |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` |
 
 See [Readiness Scanning](../scanning/readiness.md).
 
@@ -336,10 +347,14 @@ mcts inventory [options]
 |------|---------|-------------|
 | `--scan` | false | Static-scan each entrypoint for tool names |
 | `--skills` | false | Discover and scan `SKILL.md` files in agent skill directories |
+| `--findings-trust-mode` | unset (`off`) | Apply trust validator to inventory/toxic-flow findings. Omit to inherit from `.mcts/policy.yaml`; pass explicitly (including `off`) to override policy. |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` |
 | `--output`, `-o` | — | Write inventory JSON |
 | `--theme` | `cyber` | Terminal theme |
 
-Clients: Cursor, Claude Desktop, VS Code, Windsurf. Exit **1** on critical/high cross-server shadow findings.
+`--scan-all` runs a full security scan per discovered server and exits **1** on governance gate failures (same as `mcts scan`) or critical/high findings.
+
+Clients: Cursor, Claude Desktop, VS Code, Windsurf. Exit **1** on critical/high cross-server shadow findings (default inventory path).
 
 See [Config Inventory](../scanning/inventory.md).
 
@@ -363,6 +378,8 @@ PyPI specs accept npm-style `@` pins or standard PEP 508 `==` pins after the `py
 |------|---------|-------------|
 | `--json` | false | Print machine-readable report to stdout |
 | `--output`, `-o` | — | Write vet report JSON |
+| `--findings-trust-mode` | `off` | Apply trust validator to vet findings |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` |
 
 Exit **0** when no high/critical findings; **1** on high/critical issues; **2** on parse or network errors.
 
@@ -397,7 +414,7 @@ Structured red-team orchestration: static recon, metadata/attack-chain review, a
 
 ```bash
 mcts pentest examples/vulnerable-mcp-server/server.py
-mcts pentest ./server.py --live --i-understand-live-risk
+mcts pentest ./server.py --live --i-understand-live-risk --findings-trust-mode enforce
 mcts pentest ./repo --json -o pentest-report.json
 ```
 
@@ -407,10 +424,12 @@ mcts pentest ./repo --json -o pentest-report.json
 | `--i-understand-live-risk` | false | Consent for live fuzz phase |
 | `--json` | false | Print report JSON to stdout |
 | `--output`, `-o` | — | Write pentest report JSON |
+| `--findings-trust-mode` | unset (`off`) | Apply trust validator to pentest findings. Omit to inherit policy; pass explicitly to override. **`warn`** uses display severity for verdict (aligned with fuzz/vet). **`enforce`** uses gate summary. |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` |
 
 Exit **0** on pass/medium verdict; **1** on critical/high; **2** on errors.
 
-When `--scoring v2` or `both` and `score_v2` is present, **verdict** uses v2 `risk_level` instead of legacy `score.overall` bands. `absolute_risk` is always included on the pentest JSON when v2 ran.
+When `--scoring v2` or `both` and `score_v2` is present under **`off`**, **verdict** may use v2 `risk_level`. Under **`warn`**, verdict follows display severity on security findings (overlap chains capped). Under **`enforce`**, verdict follows gate summary (display-aligned).
 
 **Static-only coverage:** when static discovery finds **zero MCP tools** (e.g. prompt-only servers), the `attack_chains` phase is marked `skipped` in the JSON report. Check `pentest_limits.coverage` (`static-only` vs `full`) and `pentest_limits.attack_chains_available` to see what ran.
 
@@ -434,6 +453,8 @@ mcts fuzz <target> [options]
 | `--output`, `-o` | — | Write findings + `runtime_events` JSON |
 | `--i-understand-live-risk` | false | Live subprocess consent |
 | `--i-understand-fuzz-risk` | false | Required for **aggressive** level |
+| `--findings-trust-mode` | `off` | Apply trust validator to fuzz findings |
+| `--ignore-policy` | off | Skip merging `.mcts/policy.yaml` |
 | `--theme` | `cyber` | Terminal theme |
 
 Pipe to scan:

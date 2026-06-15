@@ -46,6 +46,27 @@ jobs:
       - run: uv run python scripts/run_behavioral_regression.py --strict --json
       - run: uv run python scripts/run_behavioral_eval.py --json > behavioral-eval.json
       - run: uv run pytest -m integration tests/integration/
+      - run: uv run python scripts/validate_trust_layer.py
+        if: matrix.python-version == '3.12'
+      - name: Fact coverage gate (enforce, 80%)
+        if: matrix.python-version == '3.12'
+        run: |
+          uv run python - <<'PY'
+          from mcts.core.config import ScanConfig
+          from mcts.core.scanner import Scanner
+          from mcts.reporting.evidence_provenance import fact_coverage
+
+          report = Scanner(
+              ScanConfig(
+                  target="examples/vulnerable-mcp-server/server.py",
+                  findings_trust_mode="enforce",
+              )
+          ).run()
+          fc = fact_coverage(report.findings)
+          pct = float(fc.get("pct", 0))
+          assert pct >= 80.0, fc
+          print(f"fact_coverage pct={pct}")
+          PY
       - run: |
           uv run python - <<'PY'
           from mcts.testing.regression_harness import REGRESSION_THRESHOLD, REGRESSION_TECHNIQUES, evaluate_technique

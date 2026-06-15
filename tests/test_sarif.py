@@ -32,7 +32,8 @@ def test_sarif_report_structure(example_server_path: Path) -> None:
 
     assert sarif["version"] == "2.1.0"
     assert sarif["runs"][0]["tool"]["driver"]["name"] == "MCTS"
-    assert len(sarif["runs"][0]["results"]) == len(report.findings)
+    exportable = [f for f in report.findings if (f.finding_kind or "security") != "coverage"]
+    assert len(sarif["runs"][0]["results"]) == len(exportable)
     assert sarif["runs"][0]["properties"]["securityScore"] == report.score.overall
     assert "taxa" not in sarif["runs"][0]
     for result in sarif["runs"][0]["results"]:

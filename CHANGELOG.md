@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 3** — `runtime_evidence.py` tags taint-flow, live-probe, and live-proxy findings; boosts `priority_score` for validated runtime evidence
+- **FindingBuilder adoption (complete)** — all analyzer paths emit bronze `evidence.facts` (optional skip rows use `build_skip_finding`)
+- **FindingBuilder adoption (batch 2)** — `attack_chains`, `supply_chain`, `toxic_flows`, `semgrep_adapter` emit bronze `evidence.facts`
+- **Phase B3 opt-in** — `--collapse-template-severity` copies display into template `severity` under enforce
+- **Vet trust adapter** — `mcts vet --findings-trust-mode` bridges `VetFinding` through shared trust pipeline
+- **Governance policy merge** — `.mcts/policy.yaml` fills unset scan flags before scan; CLI overrides policy
+- **Priority model** — `priority_score` and `evidence_strength` on all security findings when trust is on
+- **Shared trust pipeline** — fuzz/inventory/vet/readiness/pentest honor `--findings-trust-mode`; bronze gate for experimental analyzers
+- **FindingBuilder adoption** — security, metadata, behavioral, and cross-server analyzers emit bronze facts
+- **Auxiliary trust wiring** — readiness, pentest (fuzz), inventory, fuzz CLI/API paths
+- **API policy merge** — REST scans load `.mcts/policy.yaml` like CLI
+- **Global thin-evidence caps** — low-confidence findings without facts default to `weak` strength
+- **B2 residual paths** — disagreement factor and readiness score honor display severity under enforce
+
+- **API `ignore_policy`** — REST `ScanRequest.ignore_policy` skips YAML merge for one-off scans
+- **API gate parity** — `max_critical`, `fail_on_category`, `findings_trust_mode_explicit`; optional bronze/collapse flags inherit policy when null
+- **Inventory scan-all gates** — `collect_gate_violations()` per server (aligned with `mcts scan`)
+- **`--ignore-policy` on inventory/vet/fuzz** — auxiliary CLI paths can opt out of policy merge
+- **Optional analyzer skip rows** — `npm_audit`, `yara_metadata`, `cloud_inspect`, `llm_judge`, `llm_metadata_triage`, `virustotal` emit hygiene findings when deps/keys missing
+- **`--ignore-policy` on pentest/readiness** — auxiliary CLI paths can opt out of policy merge
+- **GitHub Action** — `max-high`, `max-critical`, and `ignore-policy` inputs
+- **SARIF coverage filter** — compliance `finding_kind=coverage` rows excluded from SARIF by default (`include_coverage_findings=True` to export)
+- **SARIF v2 metadata** — per-finding `mcts/v2RiskContribution` for top contributors; run-level `mcts/v2TopContributors`
+- **Hygiene bronze facts** — readiness, live/static discovery meta, and protocol probe rows emit bronze `evidence.facts`
+- **Compliance trust validation** — compliance meta-findings pass through `validate_findings()` when trust is active
+- **Fact coverage CI gate** — enforce scans must meet ≥50% structured-fact coverage (ramp toward 80%)
+- **JSON truncation** — `max_json_findings` on `ScanConfig` truncates JSON export with scan note
+- **MCP IDE scan params** — `scan_mcp_target` accepts `scoring_mode`, trust mode, and v2 gate thresholds
+- **HTML letter grade** — dashboard grade uses v2 `security_score` when present
+- **GitHub Action default** — `ci-trust` defaults to `true` (display-aligned CI gates)
+- **Auxiliary v2 gates** — `build_gate_scan_report()` computes `score_v2` when v2 YAML/CLI gates are set
+- **Bronze facts completion** — compliance, readiness OPA/LLM judge via `build_hygiene_finding`
+- **CLI `--max-json-findings`** — truncates JSON export with scan note
+- **Readiness JSON** — exports `scoring_mode`, `score_v2_note`, and v2 snapshots when scoring is v2/both
+- **Vet v2 snapshot** — `scan_score_snapshot` in vet JSON from synthetic gate scoring
+- **Fleet `max_worst_absolute_risk`** — machine-wide and inventory `--scan-all` gate
+- **Bronze counterfactual (R17 partial)** — analyzer findings with facts get counterfactual under trust
+- **fact_coverage CI gate** — raised to **80%** on enforce scans
+- **v2 gauge chart** — uses `security_score` when v2 benchmark is available
+- **Legacy evidence synthesis (R17)** — trust mode synthesizes bronze `facts` + counterfactual from legacy `evidence` keys
+- **Dashboard evidence UX** — expanded detail panel: counterfactual remediation, false-positive conditions, evidence tier
+- **Live scan fuzz merge** — safe protocol fuzz findings merged into static scan score when `--live` + consent
+- **v2 OWASP benchmarks** — `category_scores_v2` includes corpus reference scores; HTML tiles show benchmark hint
+- **v2 benchmark gauge** — doughnut gauge for `security_score` in v2 risk panel
+- **Terminal v2-first** — when `scoring_version=both`, Absolute Risk / Security Score appear first
+- **MCP IDE** — `min_category_score_v2` comma gates on `scan_mcp_target`
+
+### Fixed
+
+- **Validator hardening** — removed standalone `evidence.hop_count` and `evidence.path` proven-path bypasses; chain level matches associated graph path
+- **Auxiliary trust explicit parity** — vet/fuzz/inventory/readiness/pentest set `findings_trust_mode_explicit` when `--findings-trust-mode` is passed; API readiness adds `ignore_policy` + explicit flag
+- **Pentest warn parity** — verdict and ranking use display severity when trust ≠ off (aligned with fuzz/vet exit)
+- **Pentest warn recommendations** — remediation text matches display severity (no false “remediate critical” on overlap)
+- **Readiness warn scoring** — `readiness_score` and `production_ready` use display severity when trust ≠ off
+- **Acceptance script lint** — `scripts/validate_trust_layer.py` passes `ruff check .` (CI blocker)
+- **Auxiliary gate parity** — vet/fuzz/inventory/readiness/pentest use `collect_findings_gate_violations()`
+- **MCP explain_finding** — trust fields, facts, and interpretation in tool output
+- **compare_baselines** — display-aware critical/high counts when trust summaries present
+- **embedding_secrets** — skip row when semantic model unavailable
+- **Validator `path_status`** — stale `evidence.path_status=proven` no longer bypasses graph checks
+- **Compliance coverage kind** — compliance meta-findings tagged `finding_kind=coverage` (excluded from security priority/bronze gates)
+- **`require_auth_env_for_sensitive`** — policy gate fails when sensitive analyzers enabled without API env vars
+- **Compliance critical threshold** — `multiple-critical` uses template severity in warn/off (aligned with CI gates); display under enforce
+- **Trust edge fixes (2026-06)** — `_has_proven_path` requires associated `finding_ids`; machine-wide runs `collect_gate_violations()` per server; fuzz/vet exit uses display severity under warn/enforce; toxic_flows unique finding IDs; fuzz evidence at build time; API `max_critical` + optional bronze flags
+- **Governance deduplication** — CLI/API use single `collect_gate_violations()` path; `evaluate_policy()` is allowlist/blocklist only (numeric gates via merged `ScanConfig` + scan gates)
+- **Fuzz FindingBuilder** — fuzz findings emit bronze `evidence.facts`
+- **Governance parity** — `max_high` merged into `ScanConfig` and enforced in scan gates; REST API uses `collect_gate_violations()` (scan + YAML policy)
+- **Bronze gate enforce-only** — aligned with priority/severity gates
+- **Phase 3 scoring wire-up** — validated runtime/taint findings set `risk_tags`; v2 `evidence_quality_factor` narrows risk range
+- **Priority gate enforce-only** — `--fail-on-priority-min` aligned with severity gates (inactive in `warn`)
+- **Trust alignment (2026-06)** — category gates, `score_breakdown`, machine-wide honor display under enforce; `--ignore-policy`; explicit `--findings-trust-mode off`; policy bool merge preserves explicit `False`
+- **SARIF GitHub alignment** — rule `security-severity` follows display when `display_severity` is set (matches `level`)
+- **`warn` mode consistency** — `--severity-filter` uses template unless `enforce`; dashboard score footnote uses template basis counts in warn
+- **Policy bool merge** — unset bronze flags inherit from `.mcts/policy.yaml`; explicit CLI `False` preserved
+- **`_has_proven_path`** — empty `finding_ids` no longer marks every chain as proven
+- **Compliance rows** — receive `rule_stability` after pipeline append
+
 ## [0.1.4] - 2026-06-12
 
 ### Security

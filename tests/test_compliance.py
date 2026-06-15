@@ -46,6 +46,55 @@ def test_compliance_emits_mcp_gaps_with_tools_and_scorable_findings() -> None:
     gap = next(finding for finding in meta if finding.id == "compliance-mcp-top10-gaps")
     assert "Uncovered MCP categories" in gap.title or gap.title == "OWASP MCP Top 10 coverage gaps remain"
     assert gap.evidence.get("missing_mcp_categories")
+    assert gap.finding_kind == "coverage"
+
+
+def test_compliance_rows_are_coverage_kind() -> None:
+    meta = ComplianceChecker().check(
+        [_skill_finding(), _tool_finding()],
+        tools_discovered=3,
+        findings_trust_mode="warn",
+    )
+    assert meta
+    assert all(row.finding_kind == "coverage" for row in meta)
+    gap = next(f for f in meta if f.id == "compliance-mcp-top10-gaps")
+    facts = (gap.evidence or {}).get("facts")
+    assert isinstance(facts, list) and facts
+    assert gap.evidence.get("evidence_tier") == "bronze"
+
+
+def test_compliance_critical_count_uses_template_in_warn() -> None:
+    rows = [
+        Finding(
+            id=f"c-{i}",
+            analyzer="command_execution",
+            title="Shell",
+            description="d",
+            severity=Severity.CRITICAL,
+            recommendation="fix",
+            display_severity=Severity.MEDIUM,
+        )
+        for i in range(3)
+    ]
+    meta = ComplianceChecker().check(rows, tools_discovered=1, findings_trust_mode="warn")
+    assert any(f.id == "compliance-multiple-critical" for f in meta)
+
+
+def test_compliance_critical_count_uses_display_in_enforce() -> None:
+    rows = [
+        Finding(
+            id=f"c-{i}",
+            analyzer="command_execution",
+            title="Shell",
+            description="d",
+            severity=Severity.CRITICAL,
+            recommendation="fix",
+            display_severity=Severity.MEDIUM,
+        )
+        for i in range(3)
+    ]
+    meta = ComplianceChecker().check(rows, tools_discovered=1, findings_trust_mode="enforce")
+    assert not any(f.id == "compliance-multiple-critical" for f in meta)
 
 
 def test_mcp_owasp_mappings_hide_gaps_without_tools() -> None:

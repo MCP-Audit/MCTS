@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.oauth_implicit import detect_oauth_implicit_flow
 from mcts.inventory.discoverers import discover_config_paths, parse_config_file
 from mcts.inventory.models import InventoryEntry
@@ -462,17 +463,20 @@ def _oauth_finding(
     technique_scenario: str,
     evidence: dict[str, str],
 ) -> Finding:
-    return Finding(
-        id=finding_id,
+    return build_analyzer_finding(
+        finding_id=finding_id,
         analyzer="oauth_config",
         title=title,
         description=description,
         severity=severity,
         recommendation=_recommendation_for(technique_scenario),
+        rule_id=finding_id,
+        match=title,
+        field="oauth_config",
+        location=SourceLocation(file=source, line=None),
         technique_id=mcts_technique,
         confidence=0.85,
-        location=SourceLocation(file=source, line=None),
-        evidence=evidence,
+        extra_evidence=evidence,
     )
 
 

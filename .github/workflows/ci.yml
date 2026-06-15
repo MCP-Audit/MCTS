@@ -8,8 +8,29 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-gate:
     uses: ./.github/workflows/test-gate.yml
 
-  scoring-v2:
+  scoring-v2-gate:
     uses: ./.github/workflows/scoring-v2.yml
+
+  # Branch rulesets require check contexts named exactly "test" and "scoring-v2".
+  # Reusable workflows report nested names (e.g. test / test (3.13)); these gate jobs
+  # surface the names develop/main protection expects.
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    needs: test-gate
+    if: ${{ always() && !cancelled() }}
+    steps:
+      - name: Require test gate
+        run: test "${{ needs.test-gate.result }}" = "success"
+
+  scoring-v2:
+    name: scoring-v2
+    runs-on: ubuntu-latest
+    needs: scoring-v2-gate
+    if: ${{ always() && !cancelled() }}
+    steps:
+      - name: Require scoring-v2 gate
+        run: test "${{ needs.scoring-v2-gate.result }}" = "success"

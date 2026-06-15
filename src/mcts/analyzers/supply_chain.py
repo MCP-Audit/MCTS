@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.manifest_deps import (
     UNPINNED_PATTERN,
     is_unpinned_spec,
@@ -196,8 +197,9 @@ def _finding(
     evidence: dict[str, str] | None = None,
 ) -> Finding:
     technique = "MCTS-T-1014" if technique_scenario == "MCTS-T-1014" else "MCTS-T-1015"
-    return Finding(
-        id=finding_id,
+    location = SourceLocation(file=str(path), line=line)
+    return build_analyzer_finding(
+        finding_id=finding_id,
         analyzer="supply_chain",
         title=title,
         description=description,
@@ -206,8 +208,12 @@ def _finding(
             "Pin dependencies with exact versions or digests; "
             "verify package provenance (MCTS-M-008, MCTS-M-018)."
         ),
+        rule_id=finding_id,
+        match=description,
+        field="manifest",
+        location=location,
         technique_id=technique,
         confidence=0.75,
-        location=SourceLocation(file=str(path), line=line),
-        evidence=evidence or {},
+        snippet=description if line is not None else None,
+        extra_evidence=evidence or {},
     )

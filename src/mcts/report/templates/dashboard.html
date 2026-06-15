@@ -156,6 +156,13 @@
                 <div class="v2-absolute-risk" id="v2-absolute-risk">—</div>
                 <div class="risk-pill critical" id="v2-risk-pill">—</div>
                 <p class="score-brief" id="v2-risk-range">—</p>
+                <div class="gauge-wrap v2-benchmark-gauge" id="v2-benchmark-gauge-wrap" hidden>
+                  <canvas id="v2-gauge-chart" aria-label="Benchmark security score gauge"></canvas>
+                  <div class="gauge-center">
+                    <div class="gauge-score"><span id="v2-gauge-score-value">0</span><span class="gauge-denom"> / 100</span></div>
+                    <p class="gauge-grade">Benchmark</p>
+                  </div>
+                </div>
                 <dl class="v2-meta-dl">
                   <dt><span class="term-label">Benchmark score</span><span class="term-hint">Compared to other MCP servers (0–100, higher is better)</span></dt>
                   <dd id="v2-security-score">—</dd>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.surface_context import (
     is_intentional_context_surface,
     scan_surfaces,
@@ -60,22 +61,25 @@ class MetadataIntegrityAnalyzer(BaseAnalyzer):
         description = surface.description or ""
         if len(description) > EXCESSIVE_LENGTH and not intentional_context:
             findings.append(
-                Finding(
-                    id=f"meta-excessive-desc-{surface.label}",
+                build_analyzer_finding(
+                    finding_id=f"meta-excessive-desc-{surface.label}",
                     analyzer=self.name,
                     title=f"Excessive description length on {surface.label}",
                     description=(
                         f"Description is {len(description)} chars — may hide instructions (line jumping)."
                     ),
                     severity=Severity.MEDIUM,
-                    tool=tool_name,
                     recommendation=(
                         "Keep MCP surface descriptions concise; move docs outside the MCP surface."
                     ),
+                    rule_id="RULE_META_EXCESSIVE_DESC",
+                    match=str(len(description)),
+                    field="description",
+                    tool=tool_name,
+                    location=loc,
                     technique_id="MCTS-T-1001",
                     confidence=0.6,
-                    location=loc,
-                    evidence={"length": len(description), "surface": surface.kind.value},
+                    extra_evidence={"length": len(description), "surface": surface.kind.value},
                 )
             )
 
@@ -91,16 +95,19 @@ class MetadataIntegrityAnalyzer(BaseAnalyzer):
         field: str,
         loc,
     ) -> Finding:
-        return Finding(
-            id=finding_id,
+        return build_analyzer_finding(
+            finding_id=finding_id,
             analyzer=self.name,
             title=f"Metadata poisoning on {surface.label} ({field}): {label.replace('_', ' ')}",
             description="MCP surface metadata contains manipulative or injection patterns.",
             severity=severity,
-            tool=tool.name if tool else None,
             recommendation="Rewrite descriptions as neutral capability summaries.",
+            rule_id="RULE_META_POISON",
+            match=label,
+            field=field,
+            tool=tool.name if tool else None,
+            location=loc,
             technique_id="MCTS-T-1001",
             confidence=0.85,
-            location=loc,
-            evidence={"pattern": label, "field": field, "surface": surface.kind.value},
+            extra_evidence={"pattern": label, "field": field, "surface": surface.kind.value},
         )

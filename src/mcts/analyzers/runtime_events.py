@@ -36,6 +36,7 @@ from mcts.analyzers.dns_resolution_anomaly import detect_dns_resolution_anomaly
 from mcts.analyzers.env_file_access import detect_env_file_access
 from mcts.analyzers.exposed_endpoint import detect_exposed_endpoint
 from mcts.analyzers.fake_tool_invocation import detect_fake_tool_invocation
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.inspector_rce import detect_inspector_rce_event
 from mcts.analyzers.instruction_steganography import detect_instruction_steganography
 from mcts.analyzers.multimodal_injection import detect_multimodal_injection
@@ -995,22 +996,27 @@ def _finding(
     *,
     mcp_tool: MCPTool | None = None,
 ) -> Finding:
+    event_type = str(evidence.get("type") or "runtime_event")
     loc = SourceLocation(
         file=(mcp_tool.source_file if mcp_tool else "") or "",
         line=mcp_tool.source_line if mcp_tool else None,
     )
-    return Finding(
-        id=finding_id,
+    rule_id = f"RULE_RUNTIME_{event_type.upper().replace('-', '_')}"
+    return build_analyzer_finding(
+        finding_id=finding_id,
         analyzer="runtime_events",
         title=title,
         description=title,
         severity=severity,
-        tool=tool,
         recommendation="Review runtime telemetry and tighten tool input validation.",
+        rule_id=rule_id,
+        match=event_type,
+        field="runtime_events",
+        tool=tool,
+        location=loc if loc.file else None,
         technique_id=technique_id,
         confidence=0.85,
-        location=loc,
-        evidence=evidence,
+        extra_evidence=evidence,
     )
 
 

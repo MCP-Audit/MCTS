@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mcts.analyzers.finding_facts import build_hygiene_finding
 from mcts.core.config import ScanConfig
 from mcts.core.target import ScanTarget, TargetKind
 from mcts.discovery.language_detect import RUST_MCP_INDICATORS, detect_repo_languages
@@ -30,8 +31,8 @@ def static_discovery_meta_findings(server: MCPServerInfo, config: ScanConfig) ->
     if rust_sources and ("rust" in langs or "rs" in langs):
         return [
             tag_static_discovery_finding(
-                Finding(
-                    id="static-discovery-rust-incomplete",
+                build_hygiene_finding(
+                    finding_id="static-discovery-rust-incomplete",
                     analyzer="static_discovery",
                     title="Rust MCP sources found but no tools discovered",
                     description=(
@@ -43,9 +44,12 @@ def static_discovery_meta_findings(server: MCPServerInfo, config: ScanConfig) ->
                         "Verify rmcp #[tool] registration patterns are supported, pass "
                         "--languages rust, or use --live --i-understand-live-risk for live discovery."
                     ),
+                    rule_id="STATIC-RUST",
+                    match="rust indicators without tools",
+                    field="static_discovery",
                     technique_id="MCTS-T-1001",
                     confidence=0.9,
-                    evidence={
+                    extra_evidence={
                         "languages": sorted(langs),
                         "detected_languages": sorted(detected),
                         "discovery_mode": server.discovery_mode,
@@ -57,8 +61,8 @@ def static_discovery_meta_findings(server: MCPServerInfo, config: ScanConfig) ->
     if detected & langs:
         return [
             tag_static_discovery_finding(
-                Finding(
-                    id="static-discovery-incomplete",
+                build_hygiene_finding(
+                    finding_id="static-discovery-incomplete",
                     analyzer="static_discovery",
                     title="Static MCP tool discovery returned zero tools",
                     description=(
@@ -70,8 +74,11 @@ def static_discovery_meta_findings(server: MCPServerInfo, config: ScanConfig) ->
                         "Use --live --i-understand-live-risk, export a tools/list snapshot, "
                         "or verify static discovery supports your SDK registration patterns."
                     ),
+                    rule_id="STATIC-ZERO",
+                    match="zero tools discovered",
+                    field="static_discovery",
                     confidence=0.8,
-                    evidence={
+                    extra_evidence={
                         "languages": sorted(langs),
                         "detected_languages": sorted(detected),
                         "discovery_mode": server.discovery_mode,

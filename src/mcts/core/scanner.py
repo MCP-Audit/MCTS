@@ -203,12 +203,12 @@ class Scanner:
         if self.config.protocol_probe and self.config.remote_url:
             findings.extend(probe_protocol_security(self.config.remote_url))
 
-        findings = self._apply_filters(findings)
+        fuzz_note = self._merge_fuzz_findings(findings, analyzers_executed)
+        scan_notes_pre = [fuzz_note] if fuzz_note else []
+
         findings = dedupe_metadata_findings(findings)
         findings = dedupe_sigma_findings(findings)
         findings = enrich_findings(findings)
-        findings.extend(self.compliance.check(findings, tools_discovered=len(server_info.tools)))
-        analyzers_executed.append("compliance")
 
         raw_graph = self.attack_chains.last_graph if "attack_chains" in analyzers_executed else {}
         _trace_pipeline("graph")
@@ -218,11 +218,42 @@ class Scanner:
 
         findings = enrich_scoring_evidence(findings, attack_graph=raw_graph, scan_scope=scan_scope)
         _trace_pipeline("scope")
-        scan_notes = build_scan_notes(self.config)
 
-        score = self.scoring.score(findings)
+        from mcts.reporting.trust_pipeline import apply_trust_layer, build_trust_context
+
+        trust_ctx = build_trust_context(
+            mode=self.config.findings_trust_mode,
+            scan_scope=scan_scope,
+            tools=server_info.tools,
+            attack_graph=raw_graph,
+        )
+        findings = apply_trust_layer(findings, trust_ctx)
+        from mcts.reporting.trust_apply import collapse_template_severity_if_requested
+
+        findings = collapse_template_severity_if_requested(findings, self.config)
+
+        findings = self._apply_filters(findings)
+        from mcts.reporting.finding_validator import validate_findings
+        from mcts.reporting.rule_stability import apply_rule_stability
+
+        compliance_raw = self.compliance.check(
+            findings,
+            tools_discovered=len(server_info.tools),
+            findings_trust_mode=self.config.findings_trust_mode,
+        )
+        if self.config.findings_trust_mode != "off":
+            compliance_rows = validate_findings(compliance_raw, trust_ctx)
+        else:
+            compliance_rows = [apply_rule_stability(row) for row in compliance_raw]
+        findings.extend(compliance_rows)
+        analyzers_executed.append("compliance")
+        scan_notes = build_scan_notes(self.config)
+        scan_notes = scan_notes_pre + scan_notes
+
+        use_display_score = self.config.findings_trust_mode == "enforce"
+        score = self.scoring.score(findings, use_display=use_display_score)
         _trace_pipeline("v1")
-        if not RiskScoringEngine.verify(findings, score):
+        if not RiskScoringEngine.verify(findings, score, use_display=use_display_score):
             raise RuntimeError("Risk score does not match findings — scoring regression")
 
         score_v2 = None
@@ -244,6 +275,11 @@ class Scanner:
             _trace_pipeline("v2")
 
         summary = ScanSummary.from_findings(findings)
+        display_summary = (
+            ScanSummary.from_display(findings, security_only=True)
+            if self.config.findings_trust_mode != "off"
+            else None
+        )
 
         if self.config.save_baseline_path is not None:
             save_baseline(server_info, self.config.save_baseline_path, target=str(self.config.target))
@@ -262,18 +298,55 @@ class Scanner:
             server=server_info,
             findings=findings,
             summary=summary,
+            display_summary=display_summary,
+            findings_trust_mode=self.config.findings_trust_mode,
             score=score,
             score_v2=score_v2,
             scoring_version=self.config.scoring_mode,
             attack_graph=report_attack_graph,
             scan_scope=scan_scope,
             scan_notes=scan_notes,
-            score_breakdown=score_partitioned(findings),
+            score_breakdown=score_partitioned(findings, use_display=use_display_score),
             tool_discovery_notice=tool_discovery_notice_text(server_info, scan_scope=scan_scope),
             analyzers_executed=analyzers_executed,
         )
         append_chain_scan_notes(report.scan_notes, report, self.config)
         return report
+
+    def _merge_fuzz_findings(self, findings: list[Finding], analyzers_executed: list[str]) -> str | None:
+        """Run protocol fuzz on live scans and merge findings into the static score path."""
+        if not (self.config.live or self.config.remote_url):
+            return None
+        if not self.config.live_consent:
+            return None
+
+        from mcts.fuzz.payloads import FuzzLevel
+        from mcts.probe.startup_errors import MCPStartupError
+        from mcts.taxonomy.mapper import enrich_findings
+
+        level = FuzzLevel(self.config.fuzz_level)
+        if level == FuzzLevel.AGGRESSIVE and not self.config.fuzz_consent:
+            return None
+
+        try:
+            from mcts.fuzz.runner import FuzzRunner
+
+            result = FuzzRunner(self.config).run()
+        except MCPStartupError:
+            return "Protocol fuzz skipped — live server failed to start."
+        except (ValueError, RuntimeError):
+            return None
+
+        if not result.findings:
+            return f"Protocol fuzz ({result.level.value}): {result.probes_run} probes — no findings."
+
+        fuzz_rows = enrich_findings(list(result.findings))
+        findings.extend(fuzz_rows)
+        analyzers_executed.append("fuzz")
+        return (
+            f"Protocol fuzz ({result.level.value}): {result.probes_run} probes — "
+            f"{len(fuzz_rows)} finding(s) merged into scan score."
+        )
 
     def _attach_surface_options(self, server_info: MCPServerInfo) -> MCPServerInfo:
         cfg = self.config
@@ -330,7 +403,12 @@ class Scanner:
             rows = [f for f in rows if f.analyzer in allowed]
         if self.config.severity_filter:
             allowed = {s.lower() for s in self.config.severity_filter}
-            rows = [f for f in rows if f.severity.value in allowed]
+            if self.config.findings_trust_mode == "enforce":
+                from mcts.reporting.display import effective_severity
+
+                rows = [f for f in rows if effective_severity(f).value in allowed]
+            else:
+                rows = [f for f in rows if f.severity.value in allowed]
         if self.config.tool_filter:
             allowed = set(self.config.tool_filter)
             rows = [f for f in rows if f.tool is None or f.tool in allowed]

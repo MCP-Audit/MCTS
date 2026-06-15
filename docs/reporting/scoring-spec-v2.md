@@ -77,7 +77,11 @@ high = round(absolute_risk + spread)
 label = high if mean_conf >= 0.85 else medium if mean_conf >= 0.65 else low
 ```
 
-- `evidence_quality_factor`: 0.8 when live_probe + handler_traced tags present; else 1.2  
+- `evidence_quality_factor`: **0.8** when any of:
+  - Aggregated `risk_tags` includes both `live_probe` and `handler_traced`, or
+  - A finding has `finding_type=validated` and `runtime_validation` in `{live_probe, live_proxy}`, or
+  - A validated taint finding (`runtime_validation=taint_param_sink`) includes a handler `snippet` in `evidence.facts`
+  - Otherwise **1.2** (Phase 3 wire-up in `uncertainty.py` + `runtime_evidence.py`)
 - `analyzer_disagreement_factor`: 1.4 when conflicting severities share a tool; else 1.0
 
 ### §8.10 `top_contributors` selection (RFC §4.14)

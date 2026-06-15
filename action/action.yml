@@ -54,6 +54,41 @@ inputs:
       tree-sitter SAST.
     required: false
     default: "mcp,sast"
+  findings-trust-mode:
+    description: >
+      Findings trust layer — off (default), warn, or enforce.
+      enforce caps overlap-chain display severity and aligns gates with display counts.
+      Prefer enforce for CI; warn does not relax fail-on-critical.
+    required: false
+    default: "off"
+  ci-trust:
+    description: >
+      Shorthand for findings-trust-mode enforce with fail-on-critical (same as mcts --ci-trust).
+    required: false
+    default: "true"
+  fail-on-priority-min:
+    description: >
+      Fail when any security finding priority_score is at or above this value (0-100).
+    required: false
+    default: ""
+  min-evidence-strength:
+    description: >
+      With fail-on-priority-min, only count findings at or above this strength
+      (weak, moderate, strong, verified).
+    required: false
+    default: ""
+  max-high:
+    description: Fail when high-severity findings exceed this count (enforce uses display counts).
+    required: false
+    default: ""
+  max-critical:
+    description: Fail when critical findings exceed this count (enforce uses display counts).
+    required: false
+    default: ""
+  ignore-policy:
+    description: Skip merging .mcts/policy.yaml into scan gates for this run.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -128,6 +163,26 @@ runs:
         fi
         if [ -n "${{ inputs.assets-path }}" ]; then
           ARGS+=(--assets-path "${{ inputs.assets-path }}")
+        fi
+        if [ "${{ inputs.ci-trust }}" = "true" ]; then
+          ARGS+=(--ci-trust)
+        elif [ -n "${{ inputs.findings-trust-mode }}" ] && [ "${{ inputs.findings-trust-mode }}" != "off" ]; then
+          ARGS+=(--findings-trust-mode "${{ inputs.findings-trust-mode }}")
+        fi
+        if [ -n "${{ inputs.fail-on-priority-min }}" ]; then
+          ARGS+=(--fail-on-priority-min "${{ inputs.fail-on-priority-min }}")
+        fi
+        if [ -n "${{ inputs.min-evidence-strength }}" ]; then
+          ARGS+=(--min-evidence-strength "${{ inputs.min-evidence-strength }}")
+        fi
+        if [ -n "${{ inputs.max-high }}" ]; then
+          ARGS+=(--max-high "${{ inputs.max-high }}")
+        fi
+        if [ -n "${{ inputs.max-critical }}" ]; then
+          ARGS+=(--max-critical "${{ inputs.max-critical }}")
+        fi
+        if [ "${{ inputs.ignore-policy }}" = "true" ]; then
+          ARGS+=(--ignore-policy)
         fi
 
         uv run mcts "${ARGS[@]}"

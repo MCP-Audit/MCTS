@@ -35,6 +35,8 @@ How MCTS **presents** scan results — scores, exports, and shareable reports.
 
 | Page | When to read |
 |------|--------------|
+| [Interpreting findings](interpreting-findings.md) | Why attack chains / overlap look alarming; trust mode |
+| **[Findings trust — Phase 0 status](findings-trust-phase0.md)** | **Maintainers:** what shipped, what’s missing, CI/API fields |
 | [HTML dashboard](html-report.md) | Layout of the executive report |
 | [Threat taxonomy](taxonomy.md) | MCTS-T technique IDs on findings |
 

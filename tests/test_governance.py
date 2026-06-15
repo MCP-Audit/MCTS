@@ -3,12 +3,50 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
 from mcts.cli.main import app
-from mcts.governance import evaluate_policy, load_policy
+from mcts.core.config import ScanConfig
+from mcts.governance import evaluate_policy, load_policy, merge_scan_config_with_policy
+from mcts.governance.gate_violations import collect_gate_violations
+from mcts.governance.scan_gates import evaluate_scan_gate_violations
 from mcts.output.analysis_dir import ANALYSIS_DIR_NAME
+from mcts.reporting.models import Finding, RiskScore, ScanSummary, ScoreBasis, Severity, SourceLocation
+from mcts.scoring.models import RiskScoreV2, ScoreV2Basis
+
+
+def _score_v2(**kwargs) -> RiskScoreV2:
+    defaults = {
+        "absolute_risk": 400,
+        "security_score": 40,
+        "risk_level": "critical",
+        "legacy_overall": 90,
+        "basis": ScoreV2Basis(scorable_count=1, excluded_non_scorable=0),
+    }
+    defaults.update(kwargs)
+    return RiskScoreV2(**defaults)
+
+
+def _risk_score(**kwargs) -> RiskScore:
+    defaults = {
+        "overall": 90,
+        "risk_index": 0,
+        "raw_risk": 0,
+        "penalty": 0,
+        "basis": ScoreBasis(
+            critical=0,
+            high=0,
+            medium=0,
+            low=0,
+            scorable_total=0,
+            excluded_non_scorable=0,
+        ),
+    }
+    defaults.update(kwargs)
+    return RiskScore(**defaults)
+
 
 runner = CliRunner()
 
@@ -20,39 +58,25 @@ def test_load_and_evaluate_policy(tmp_path: Path) -> None:
     )
     policy = load_policy(policy_path)
     assert policy is not None
-    violations = evaluate_policy(
-        policy=policy,
-        score=70,
-        critical=0,
-        high=1,
-        servers=["cursor/other"],
-    )
-    assert any("score" in item for item in violations)
+    violations = evaluate_policy(policy=policy, servers=["cursor/other"])
     assert any("allowlist" in item for item in violations)
+    assert not any("score" in item for item in violations)
 
 
-def test_evaluate_policy_v2_gates() -> None:
-    from mcts.governance.policy import GovernancePolicy
-
-    policy = GovernancePolicy(min_security_score=50, max_absolute_risk=300)
-    violations = evaluate_policy(
-        policy=policy,
-        score=90,
-        critical=0,
-        high=0,
-        servers=["demo"],
-        absolute_risk=400,
-        security_score=40,
+def test_scan_gate_violations_v2_limits() -> None:
+    report = SimpleNamespace(
+        score=_risk_score(),
+        score_v2=_score_v2(absolute_risk=400, security_score=40, risk_level="critical"),
+        findings=[],
+        summary=ScanSummary(),
     )
-    assert any("absolute risk" in item for item in violations)
-    assert any("security score" in item for item in violations)
+    config = ScanConfig(target=Path("."), min_security_score=50, max_absolute_risk=300, scoring_mode="both")
+    violations = evaluate_scan_gate_violations(report, config)
+    assert any("absolute_risk" in item for item in violations)
+    assert any("security_score" in item for item in violations)
 
 
-def test_evaluate_policy_min_category_score_v2() -> None:
-    from mcts.governance.policy import GovernancePolicy
-    from mcts.reporting.models import Finding, Severity, SourceLocation
-
-    policy = GovernancePolicy(min_category_score_v2={"injection": 80})
+def test_scan_gate_violations_min_category_score_v2() -> None:
     findings = [
         Finding(
             id="inj-1",
@@ -64,33 +88,31 @@ def test_evaluate_policy_min_category_score_v2() -> None:
             location=SourceLocation(file="x.py"),
         )
     ]
-    violations = evaluate_policy(
-        policy=policy,
-        score=90,
-        critical=1,
-        high=0,
-        servers=["demo"],
-        absolute_risk=500,
-        risk_level="critical",
+    report = SimpleNamespace(
+        score=_risk_score(),
+        score_v2=_score_v2(absolute_risk=500, security_score=10, risk_level="critical"),
         findings=findings,
+        summary=ScanSummary(),
     )
+    config = ScanConfig(
+        target=Path("."),
+        min_category_score_v2={"injection": 80},
+        scoring_mode="both",
+    )
+    violations = evaluate_scan_gate_violations(report, config)
     assert any("v2 category score" in item for item in violations)
 
 
-def test_evaluate_policy_max_risk_level() -> None:
-    from mcts.governance.policy import GovernancePolicy
-
-    policy = GovernancePolicy(max_risk_level="medium")
-    violations = evaluate_policy(
-        policy=policy,
-        score=90,
-        critical=0,
-        high=0,
-        servers=["demo"],
-        absolute_risk=300,
-        risk_level="high",
+def test_scan_gate_violations_max_risk_level() -> None:
+    report = SimpleNamespace(
+        score=_risk_score(),
+        score_v2=_score_v2(absolute_risk=300, security_score=50, risk_level="high"),
+        findings=[],
+        summary=ScanSummary(),
     )
-    assert any("risk level" in item for item in violations)
+    config = ScanConfig(target=Path("."), max_risk_level="medium", scoring_mode="both")
+    violations = evaluate_scan_gate_violations(report, config)
+    assert any("risk_level" in item for item in violations)
 
 
 def test_scan_missing_policy_fails_before_reports(tmp_path: Path, monkeypatch) -> None:
@@ -120,3 +142,21 @@ def test_scan_invalid_policy_fails_before_reports(tmp_path: Path, monkeypatch) -
     assert result.exit_code == 2
     assert "Governance policy must be a YAML mapping" in result.stdout
     assert not (tmp_path / ANALYSIS_DIR_NAME).exists()
+
+
+def test_collect_gate_violations_no_duplicate_min_score(tmp_path: Path) -> None:
+    from mcts.core.scanner import Scanner
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("min_score: 80\n", encoding="utf-8")
+    target = Path("examples/single-tool-agent-server/server.py")
+    policy = load_policy(policy_path)
+    assert policy is not None
+    config = merge_scan_config_with_policy(
+        ScanConfig(target=target, governance_policy=policy_path),
+        policy,
+    )
+    report = Scanner(ScanConfig(target=target)).run()
+    violations = collect_gate_violations(report, config)
+    min_score_msgs = [item for item in violations if "legacy overall score" in item]
+    assert len(min_score_msgs) == 1

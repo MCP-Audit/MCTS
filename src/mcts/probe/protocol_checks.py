@@ -226,7 +226,18 @@ def _protocol_finding(
     cwe: str,
     evidence: dict | None = None,
 ) -> Finding:
-    ev = {"check_id": check_id, **(evidence or {})}
+    ev = {
+        "check_id": check_id,
+        "facts": [
+            {
+                "rule_id": check_id,
+                "match": title,
+                "field": "protocol_probe",
+            }
+        ],
+        "evidence_tier": "bronze",
+        **(evidence or {}),
+    }
     return Finding(
         id=finding_id,
         analyzer="protocol_probe",

@@ -6,6 +6,7 @@ import ast
 import re
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.mcp.models import MCPServerInfo, MCPTool
 from mcts.reporting.models import Finding, Severity, SourceLocation
 from mcts.sast.go.sinks import detect_go_sinks
@@ -169,18 +170,22 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
             ]
             if hit:
                 findings.append(
-                    Finding(
-                        id=f"behavioral-mismatch-{tool.name}-{'-'.join(hit[:2])}",
+                    build_analyzer_finding(
+                        finding_id=f"behavioral-mismatch-{tool.name}-{'-'.join(hit[:2])}",
                         analyzer=self.name,
                         title=f"Description/code mismatch on {tool.name}",
                         description=(f"Tool claims '{claim_re.pattern}' but handler uses: {', '.join(hit)}"),
                         severity=max(sinks[s] for s in hit),
-                        tool=tool.name,
                         recommendation="Align tool description with actual handler behavior.",
+                        rule_id="RULE_BEHAVIOR_MISMATCH",
+                        match=hit[0],
+                        field="handler_body",
+                        tool=tool.name,
+                        location=loc,
                         technique_id="MCTS-T-1001",
                         confidence=0.8,
-                        location=loc,
-                        evidence={"sinks": hit, "description": description[:200]},
+                        snippet=(tool.handler_snippet or "")[:160].replace("\n", " ").strip() or None,
+                        extra_evidence={"sinks": hit, "description": description[:200]},
                     )
                 )
         return findings
@@ -189,6 +194,7 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
         if not taint.sinks:
             return []
         loc = SourceLocation(file=tool.source_file or "", line=tool.source_line)
+        snippet = (tool.handler_snippet or "")[:160].replace("\n", " ").strip() or None
         if taint.tainted_params:
             description = (
                 f"Handler parameters {sorted(taint.tainted_params)} may flow to "
@@ -201,18 +207,22 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
             )
             confidence = 0.65
         return [
-            Finding(
-                id=f"behavioral-taint-{tool.name}-{'-'.join(taint.sinks[:2])}",
+            build_analyzer_finding(
+                finding_id=f"behavioral-taint-{tool.name}-{'-'.join(taint.sinks[:2])}",
                 analyzer=self.name,
                 title=f"Untrusted input may reach sink on {tool.name}",
                 description=description,
                 severity=max(sinks.get(s, Severity.HIGH) for s in taint.sinks),
-                tool=tool.name,
                 recommendation="Validate and sanitize tool inputs before dangerous operations.",
+                rule_id="RULE_TAINT_PARAM_SINK",
+                match=taint.sinks[0],
+                field="handler_body",
+                tool=tool.name,
+                location=loc,
                 technique_id="MCTS-T-1001",
                 confidence=confidence,
-                location=loc,
-                evidence={
+                snippet=snippet,
+                extra_evidence={
                     "sinks": taint.sinks,
                     "tainted_params": sorted(taint.tainted_params),
                 },
@@ -226,8 +236,8 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
         findings: list[Finding] = []
         for issue in issues:
             findings.append(
-                Finding(
-                    id=f"behavioral-semantic-{tool.name}-{issue.label}",
+                build_analyzer_finding(
+                    finding_id=f"behavioral-semantic-{tool.name}-{issue.label}",
                     analyzer=self.name,
                     title=f"Semantic risk on {tool.name}: {issue.label.replace('_', ' ')}",
                     description=(
@@ -235,12 +245,15 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
                         f"({issue.label})."
                     ),
                     severity=Severity.HIGH if issue.confidence >= 0.8 else Severity.MEDIUM,
-                    tool=tool.name,
                     recommendation="Align documented behavior with implementation; remove hidden directives.",
+                    rule_id="RULE_BEHAVIOR_SEMANTIC",
+                    match=issue.label,
+                    field="handler_body",
+                    tool=tool.name,
+                    location=loc,
                     technique_id="MCTS-T-1001",
                     confidence=issue.confidence,
-                    location=loc,
-                    evidence={"category": issue.category, "label": issue.label},
+                    extra_evidence={"category": issue.category, "label": issue.label},
                 )
             )
         return findings
@@ -249,18 +262,21 @@ class BehavioralStaticAnalyzer(BaseAnalyzer):
         loc = SourceLocation(file=tool.source_file or "", line=tool.source_line)
         labels = list(sinks.keys())[:4]
         return [
-            Finding(
-                id=f"behavioral-sink-{tool.name}-{'-'.join(labels)}",
+            build_analyzer_finding(
+                finding_id=f"behavioral-sink-{tool.name}-{'-'.join(labels)}",
                 analyzer=self.name,
                 title=f"Security-sensitive operations in {tool.name}",
                 description=f"Handler module uses: {', '.join(labels)}",
                 severity=max(sinks.values()),
-                tool=tool.name,
                 recommendation="Review helper functions invoked by this tool for hidden behavior.",
+                rule_id="RULE_BEHAVIOR_SINK",
+                match=labels[0],
+                field="handler_body",
+                tool=tool.name,
+                location=loc,
                 technique_id="MCTS-T-1001",
                 confidence=0.6,
-                location=loc,
-                evidence={"sinks": labels},
+                extra_evidence={"sinks": labels},
             )
         ]
 

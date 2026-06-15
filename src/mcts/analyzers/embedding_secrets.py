@@ -9,6 +9,7 @@ from typing import Any
 
 from mcts.analyzers.base import BaseAnalyzer
 from mcts.analyzers.data_leakage import SECRET_PATTERNS
+from mcts.analyzers.finding_facts import build_analyzer_finding, build_skip_finding
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity, SourceLocation
 
@@ -57,6 +58,8 @@ class EmbeddingSecretsAnalyzer(BaseAnalyzer):
 
     def analyze(self, server: MCPServerInfo) -> list[Finding]:
         findings: list[Finding] = []
+        if self.semantic_secrets:
+            _load_embedding_model()
         for tool in server.tools:
             corpus = _tool_corpus(tool)
             if _regex_credential_hit(corpus):
@@ -64,6 +67,18 @@ class EmbeddingSecretsAnalyzer(BaseAnalyzer):
                 continue
             if self.semantic_secrets and _semantic_credential_hit(corpus, self.semantic_threshold):
                 findings.append(_finding(tool, "semantic_credential", 0.8))
+        if self.semantic_secrets and _EMBEDDING_STATE.unavailable:
+            findings.append(
+                build_skip_finding(
+                    finding_id="embedding-secrets-semantic-skipped",
+                    analyzer="embedding_secrets",
+                    title="Semantic credential detection skipped",
+                    description=("Semantic embedding model unavailable; only regex and phrase fallback ran."),
+                    recommendation=(
+                        "Install sentence-transformers and model weights, or disable semantic_secrets."
+                    ),
+                )
+            )
         return findings
 
 
@@ -138,16 +153,19 @@ def _load_embedding_model() -> Any | None:
 
 
 def _finding(tool: Any, mode: str, confidence: float) -> Finding:
-    return Finding(
-        id=f"embed-secret-{tool.name}",
+    return build_analyzer_finding(
+        finding_id=f"embed-secret-{tool.name}",
         analyzer="embedding_secrets",
         title=f"Credential-like content in {tool.name}",
         description="Tool metadata resembles embedded secrets or credential harvesting instructions.",
         severity=Severity.HIGH,
-        tool=tool.name,
         recommendation="Remove secrets from tool metadata; sanitize embeddings before storage (MCTS-M-025).",
+        rule_id="RULE_EMBED_SECRET",
+        match=mode,
+        field="tool_metadata",
+        tool=tool.name,
+        location=SourceLocation(file=tool.source_file or "", line=tool.source_line),
         technique_id="MCTS-T-1022",
         confidence=confidence,
-        location=SourceLocation(file=tool.source_file or "", line=tool.source_line),
-        evidence={"mode": mode},
+        extra_evidence={"mode": mode},
     )

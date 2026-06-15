@@ -9,16 +9,49 @@ from typing import Any
 from mcts.taxonomy.mapper import load_taxonomy
 
 
-def scan_mcp_target(target: str, live: bool = False) -> str:
+def scan_mcp_target(
+    target: str,
+    live: bool = False,
+    scoring_mode: str = "both",
+    findings_trust_mode: str | None = None,
+    min_security_score: int | None = None,
+    max_absolute_risk: int | None = None,
+    max_risk_level: str | None = None,
+    min_category_score_v2: str | None = None,
+    fail_on_critical: bool = False,
+    max_critical: int | None = None,
+    max_high: int | None = None,
+) -> str:
     """Run an MCTS security scan on an MCP server path or repository."""
     from mcts.core.config import ScanConfig
     from mcts.core.scanner import Scanner
+    from mcts.report.data import parse_min_category_score_v2
+
+    category_gates: dict[str, int] = {}
+    if min_category_score_v2:
+        parts = [p.strip() for p in min_category_score_v2.split(",") if p.strip()]
+        category_gates = parse_min_category_score_v2(parts)
 
     config = ScanConfig(
         target=Path(target),
         live=live,
         live_consent=live,
+        scoring_mode=scoring_mode,
+        min_security_score=min_security_score,
+        max_absolute_risk=max_absolute_risk,
+        max_risk_level=max_risk_level,
+        min_category_score_v2=category_gates,
+        fail_on_critical=fail_on_critical,
+        max_critical=max_critical,
+        max_high=max_high,
     )
+    if findings_trust_mode is not None:
+        config = config.model_copy(
+            update={
+                "findings_trust_mode": findings_trust_mode,
+                "findings_trust_mode_explicit": True,
+            }
+        )
     report = Scanner(config).run()
     return json.dumps(report.model_dump(mode="json"), indent=2)
 
@@ -57,13 +90,29 @@ def explain_finding(finding_id: str, report_json: str) -> str:
         "id": match.get("id"),
         "title": match.get("title"),
         "severity": match.get("severity"),
+        "display_severity": match.get("display_severity"),
+        "impact": match.get("impact"),
+        "evidence_strength": match.get("evidence_strength"),
+        "evidence_type": match.get("evidence_type"),
+        "finding_type": match.get("finding_type"),
+        "finding_kind": match.get("finding_kind"),
+        "priority_score": match.get("priority_score"),
+        "chain_level": match.get("chain_level"),
+        "rule_stability": match.get("rule_stability"),
         "analyzer": match.get("analyzer"),
         "technique_id": match.get("technique_id"),
         "description": match.get("description"),
         "recommendation": match.get("recommendation"),
-        "evidence": match.get("evidence") or {},
         "tool": match.get("tool"),
     }
+    evidence = match.get("evidence") or {}
+    explanation["confidence_factors"] = evidence.get("confidence_factors")
+    explanation["false_positive_conditions"] = evidence.get("false_positive_conditions")
+    explanation["counterfactual_remediation"] = evidence.get("counterfactual_remediation")
+    explanation["facts"] = evidence.get("facts")
+    explanation["interpretation"] = evidence.get("interpretation")
+    explanation["runtime_validation"] = evidence.get("runtime_validation")
+    explanation["evidence"] = evidence
     return json.dumps(explanation, indent=2)
 
 
@@ -91,6 +140,9 @@ def compare_baselines(baseline_report_json: str, current_report_json: str) -> st
         delta["chain_meta_note"] = (
             "Finding deltas may include attack_chains meta-rows excluded from v2 absolute_risk."
         )
+    display_crit_delta = (current.get("display_critical") or 0) - (baseline.get("display_critical") or 0)
+    if display_crit_delta and display_crit_delta != chain_delta:
+        delta["display_critical_delta"] = display_crit_delta
     return json.dumps(delta, indent=2)
 
 
@@ -115,27 +167,24 @@ def create_server():
 
 
 def _report_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    score = payload.get("score") or {}
+    summary = payload.get("summary") or {}
+    display_summary = payload.get("display_summary") or {}
     score_v2 = payload.get("score_v2") or {}
     findings = payload.get("findings") or []
-    summary: dict[str, Any] = {
-        "overall_score": int(score.get("overall") or 0),
+    return {
+        "overall_score": int((payload.get("score") or {}).get("overall") or 0),
         "finding_count": len(findings),
-        "finding_ids": sorted(str(row.get("id")) for row in findings if row.get("id")),
-        "critical": int((payload.get("summary") or {}).get("critical") or 0),
-        "high": int((payload.get("summary") or {}).get("high") or 0),
-        "scoring_version": payload.get("scoring_version") or "legacy",
+        "critical": int(summary.get("critical") or 0),
+        "display_critical": int(display_summary.get("critical") or 0),
+        "scoring_version": payload.get("scoring_version"),
+        "absolute_risk": score_v2.get("absolute_risk"),
+        "security_score": score_v2.get("security_score"),
+        "risk_level": score_v2.get("risk_level"),
+        "finding_ids": [row.get("id") for row in findings if row.get("id")],
     }
-    if score_v2:
-        if score_v2.get("absolute_risk") is not None:
-            summary["absolute_risk"] = int(score_v2["absolute_risk"])
-        if score_v2.get("security_score") is not None:
-            summary["security_score"] = int(score_v2["security_score"])
-        if score_v2.get("risk_level"):
-            summary["risk_level"] = str(score_v2["risk_level"])
-    return summary
 
 
 def _new_finding_ids(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
-    old = set(baseline.get("finding_ids") or [])
-    return sorted(fid for fid in current.get("finding_ids") or [] if fid not in old)
+    baseline_ids = set(baseline.get("finding_ids") or [])
+    current_ids = set(current.get("finding_ids") or [])
+    return sorted(current_ids - baseline_ids)

@@ -30,6 +30,8 @@ jobs:
       - uses: ./action
         with:
           target: examples/vulnerable-mcp-server/server.py
+          # ci-trust forces fail-on-critical + min-score 70; smoke test only checks outputs.
+          ci-trust: "false"
           fail-on-critical: "false"
 
       - name: Upload SARIF for GitHub Code Scanning

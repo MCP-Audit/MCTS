@@ -146,6 +146,73 @@ def test_api_health_and_readiness_endpoints():
     assert "findings" in payload
 
 
+def test_api_readiness_explicit_off_overrides_policy(tmp_path: Path) -> None:
+    pytest.importorskip("fastapi")
+    from pathlib import Path as PathType
+
+    from fastapi.testclient import TestClient
+
+    from mcts.api.app import _merge_policy, app
+    from mcts.core.config import ScanConfig
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("findings_trust_mode: enforce\n", encoding="utf-8")
+    config = _merge_policy(
+        ScanConfig(
+            target=PathType("."),
+            findings_trust_mode="off",
+            findings_trust_mode_explicit=True,
+            governance_policy=policy_path,
+        )
+    )
+    assert config.findings_trust_mode == "off"
+
+    client = TestClient(app)
+    response = client.post(
+        "/readiness",
+        json={
+            "target": ".",
+            "findings_trust_mode": "off",
+            "findings_trust_mode_explicit": True,
+            "governance_policy": str(policy_path),
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_api_readiness_ignore_policy_skips_merge(tmp_path: Path) -> None:
+    pytest.importorskip("fastapi")
+    from pathlib import Path as PathType
+
+    from fastapi.testclient import TestClient
+
+    from mcts.api.app import _merge_policy, app
+    from mcts.core.config import ScanConfig
+
+    policy_path = tmp_path / "policy.yaml"
+    policy_path.write_text("findings_trust_mode: enforce\nmax_critical: 0\n", encoding="utf-8")
+    config = _merge_policy(
+        ScanConfig(
+            target=PathType("."),
+            ignore_policy=True,
+            governance_policy=policy_path,
+        )
+    )
+    assert config.findings_trust_mode == "off"
+    assert config.max_critical is None
+
+    client = TestClient(app)
+    response = client.post(
+        "/readiness",
+        json={
+            "target": ".",
+            "ignore_policy": True,
+            "governance_policy": str(policy_path),
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_api_requires_key_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

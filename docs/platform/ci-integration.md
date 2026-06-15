@@ -100,6 +100,10 @@ Full reference: [action/README.md](../../action/README.md)
 | `max-absolute-risk` | — | v2 absolute risk ceiling |
 | `max-risk-level` | — | v2 band gate (`low` … `critical`) |
 | `min-category-score-v2` | — | Comma-separated `category:min` for v2 OWASP tiles |
+| `findings-trust-mode` | `off` | Trust layer: `off`, `warn`, or `enforce` (prefer `enforce` / `ci-trust` for CI) |
+| `ci-trust` | `true` | Shorthand: enforce + aligned gates (same as `mcts --ci-trust`). Set `false` for template-mode scans. |
+| `fail-on-priority-min` | — | Fail when priority ≥ threshold (**enforce** only) |
+| `min-evidence-strength` | — | Optional filter for priority gate |
 | `extras` | `mcp,sast` | Optional extras to install (`all` for full set) |
 
 ---
@@ -168,6 +172,53 @@ GitHub Action equivalents: `scoring`, `min-security-score`, `max-absolute-risk`,
 ```
 
 See [Scoring developer guide](../reporting/scoring-guide.md), [migration](../migration/scoring-v2.md), and [SARIF scoreV2](../reporting/sarif-score-v2.md).
+
+### Findings trust mode in CI
+
+Overlap-style attack chains can inflate template `critical` counts without a proven multi-step path. Use the findings trust layer when you want gates and SARIF to reflect **display** severity.
+
+| Mode | CI gates (severity, priority, bronze) | Legacy score | Dashboard / SARIF |
+|------|--------------------------------------|--------------|-------------------|
+| `off` (default) | Template severity | Template | Template |
+| `warn` | **Template** severity; priority/bronze gates **inactive** | Template | Display badges preview |
+| `enforce` | **Display** severity; priority + bronze gates active | Display-aligned basis | Display |
+
+```bash
+# Recommended for MCP overlap noise (same as --ci-trust preset)
+mcts scan ./server.py \
+  --findings-trust-mode enforce \
+  --fail-on-critical \
+  --min-score 70
+```
+
+GitHub Action (default `ci-trust: true`; set `false` to opt out):
+
+```yaml
+- uses: MCP-Audit/MCTS@v1
+  with:
+    target: ./server.py
+    ci-trust: true
+    fail-on-critical: true
+    min-score: "70"
+```
+
+Governance policy (`.mcts/policy.yaml`) can set trust fields when CLI omits them. Use **`--ignore-policy`** or explicit **`--findings-trust-mode off`** for one-off legacy scans when policy sets `enforce`.
+
+**Integrators:** Gate on `display_summary` / `display_severity`, not `summary.critical` alone. SARIF `level` and rule `security-severity` follow display when trust fields are set; template severity remains in `properties.severity`.
+
+See [Interpreting findings](../reporting/interpreting-findings.md) and [Findings trust (Phase 0)](../reporting/findings-trust-phase0.md).
+
+### Scan history and trends
+
+`mcts_analysis/history.json` records both template and display counts when trust is on:
+
+| Field | Meaning |
+|-------|---------|
+| `critical` | Template severity count (always recorded) |
+| `display_critical` | Display severity count (when trust enabled) |
+| `findings_trust_mode` | `off`, `warn`, or `enforce` for that run |
+
+When comparing trend lines across weeks, **filter by `findings_trust_mode`** or chart `display_critical` only. A drop from 3 → 0 critical may mean trust was enabled, not that vulnerabilities were fixed.
 
 ### SARIF for code scanning
 
@@ -325,6 +376,19 @@ Pair MCTS gates with required CI checks on `main`. See [CONTRIBUTING.md](../../C
 | SARIF contents | May include file paths and finding snippets — treat as security data |
 | HTML artifacts | Self-contained; no exfiltration, but contains full scan |
 | Secrets in repos | MCTS may flag secrets in scanned source — rotate if leaked in CI logs |
+
+### Fleet gates (`--machine-wide`, inventory `--scan-all`)
+
+Per-server gates run via `collect_gate_violations()`. Fleet-wide v2 cap:
+
+```bash
+mcts scan --machine-wide --scoring both --max-worst-absolute-risk 500
+mcts inventory --scan-all --scoring both --max-worst-absolute-risk 500
+```
+
+YAML: `max_worst_absolute_risk` in `.mcts/policy.yaml` (see `.mcts/policy.yaml.example`).
+
+**Dual exit heuristic:** If no explicit gate fires, machine-wide and inventory scan-all may still exit 1 when any server has critical/high display counts (or v2 `risk_level` high/critical). Prefer explicit `--max-critical` / `--max-worst-absolute-risk` for predictable CI.
 
 ---
 

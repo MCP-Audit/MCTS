@@ -9,6 +9,8 @@ from mcts.compliance.checks import MCP_ANALYZER_MAP, OWASP_LLM_ANALYZER_MAP, OWA
 from mcts.mcp.models import CapabilityProfile
 from mcts.report.analyzer_catalog import analyzer_info
 from mcts.report.scan_meta import tool_discovery_context
+from mcts.reporting.display import effective_impact, effective_severity, report_trust_enforced
+from mcts.reporting.evidence_provenance import fact_coverage
 from mcts.reporting.models import Finding, ScanReport, ScanSummary, Severity, SourceLocation
 from mcts.scoring.engine import RISK_WEIGHTS
 from mcts.taxonomy.mapper import technique_catalog
@@ -114,6 +116,15 @@ INDUSTRY_BENCHMARK: dict[str, float] = {
     "jailbreak": 3,
 }
 
+# v2 OWASP tile health benchmarks (100 = good) — corpus-informed defaults for dashboard overlay.
+INDUSTRY_BENCHMARK_V2: dict[str, int] = {
+    "injection": 82,
+    "exfiltration": 80,
+    "privilege": 78,
+    "supply_chain": 88,
+    "protocol": 80,
+}
+
 RISK_GUIDE = (
     {
         "key": "critical",
@@ -151,7 +162,14 @@ RISK_GUIDE = (
 
 
 def sort_findings(findings: list[Finding]) -> list[Finding]:
-    return sorted(findings, key=lambda f: (SEVERITY_ORDER[f.severity], f.title))
+    return sorted(
+        findings,
+        key=lambda f: (
+            -(f.priority_score if f.priority_score is not None else -1),
+            SEVERITY_ORDER[effective_severity(f)],
+            f.title,
+        ),
+    )
 
 
 def format_location(location: SourceLocation | None) -> str:
@@ -172,6 +190,19 @@ def format_evidence_summary(evidence: dict[str, Any]) -> str:
     """One-line preview for findings table."""
     if not evidence:
         return ""
+    facts = evidence.get("facts")
+    if isinstance(facts, list) and facts:
+        first = facts[0]
+        if isinstance(first, dict):
+            rule = first.get("rule_id", "")
+            match = first.get("match", "")
+            tool = first.get("tool", "")
+            lead = f"{rule}: {match}" if rule else str(match)
+            if tool:
+                lead = f"{tool} — {lead}"
+            if len(facts) > 1:
+                lead += f" (+{len(facts) - 1} signal(s))"
+            return lead
     parts: list[str] = []
     for key in ("rule_id", "matched", "missing_mcp_categories", "read_tools", "exfil_tools"):
         if key in evidence and evidence[key]:
@@ -274,20 +305,36 @@ def security_grade(score: int) -> dict[str, str]:
     return {"letter": "F", "label": "Critical", "posture": "Critical"}
 
 
+def _include_in_executive_heuristics(finding: Finding) -> bool:
+    """Exclude overlap-only attack chain meta-findings from alarm heuristics."""
+    return not (finding.analyzer == "attack_chains" and finding.evidence_type == "capability_overlap")
+
+
 def build_executive_summary(findings: list[Finding], summary: ScanSummary) -> dict[str, Any]:
     """Executive narrative and prioritized actions derived from findings."""
     paragraphs: list[str] = []
     bullets: list[str] = []
 
     chain_findings = [f for f in findings if f.analyzer == "attack_chains"]
+    has_proven = False
+    has_overlap = False
     if chain_findings:
-        paragraphs.append("Critical attack chains were detected.")
+        has_proven = any(f.evidence_type == "graph_path" for f in chain_findings)
+        has_overlap = any(f.evidence_type == "capability_overlap" for f in chain_findings)
+        if has_overlap and not has_proven:
+            paragraphs.append(
+                "Potential tool capability overlaps were detected (no proven multi-step paths)."
+            )
+        else:
+            paragraphs.append("Critical attack chains were detected.")
     elif summary.critical:
         paragraphs.append("Critical-severity findings require immediate remediation.")
 
+    heuristic_findings = [f for f in findings if _include_in_executive_heuristics(f)]
+
     shell_findings = [
         f
-        for f in findings
+        for f in heuristic_findings
         if (f.tool and "shell" in f.tool.lower())
         or "shell" in f.title.lower()
         or "run_shell" in (f.tool or "")
@@ -297,10 +344,13 @@ def build_executive_summary(findings: list[Finding], summary: ScanSummary) -> di
 
     exfil_findings = [
         f
-        for f in findings
+        for f in heuristic_findings
         if "exfil" in f.title.lower() or "webhook" in f.title.lower() or "send_webhook" in (f.tool or "")
     ]
-    if exfil_findings or any("exfil_tools" in f.evidence for f in findings if f.analyzer == "attack_chains"):
+    chain_exfil = any(
+        "exfil_tools" in (f.evidence or {}) for f in chain_findings if f.evidence_type != "capability_overlap"
+    )
+    if exfil_findings or chain_exfil:
         paragraphs.append("Sensitive data exfiltration paths were identified.")
 
     file_findings = [
@@ -330,7 +380,10 @@ def build_executive_summary(findings: list[Finding], summary: ScanSummary) -> di
         ("injection", "Sanitize tool inputs and enforce instruction boundaries"),
     ]
     seen_bullets: set[str] = set()
+    suppress_chain_recs = bool(chain_findings) and has_overlap and not has_proven
     for rec in recs:
+        if suppress_chain_recs and rec.get("analyzer") == "attack_chains":
+            continue
         text = rec["recommendation"]
         if text not in seen_bullets and len(bullets) < 5:
             seen_bullets.add(text)
@@ -340,7 +393,9 @@ def build_executive_summary(findings: list[Finding], summary: ScanSummary) -> di
             break
         if action in seen_bullets:
             continue
-        if any(_keyword in f.title.lower() or _keyword in f.recommendation.lower() for f in findings):
+        if any(
+            _keyword in f.title.lower() or _keyword in f.recommendation.lower() for f in heuristic_findings
+        ):
             bullets.append(action)
             seen_bullets.add(action)
 
@@ -368,15 +423,16 @@ def _append_passed_checks_summary(
     paragraphs.insert(0, lead)
 
 
-def _finding_risk_points(finding: Finding) -> int:
-    return RISK_WEIGHTS[finding.severity]
+def _finding_risk_points(finding: Finding, *, use_display: bool = False) -> int:
+    severity = effective_severity(finding) if use_display else finding.severity
+    return RISK_WEIGHTS[severity]
 
 
-def category_scores(findings: list[Finding]) -> list[dict[str, Any]]:
+def category_scores(findings: list[Finding], *, use_display: bool = False) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key, label, maximum, analyzers in CATEGORY_DEFS:
         matched = [f for f in findings if f.analyzer in analyzers]
-        points = sum(_finding_risk_points(f) for f in matched)
+        points = sum(_finding_risk_points(f, use_display=use_display) for f in matched)
         score = min(maximum, points)
         passed = len(matched) == 0
         rows.append(
@@ -508,11 +564,16 @@ def parse_min_category_score_v2(raw_values: list[str] | None) -> dict[str, int]:
     return gates
 
 
-def category_scores_v2_gate_failures(findings: list[Finding], gates: dict[str, int]) -> list[str]:
+def category_scores_v2_gate_failures(
+    findings: list[Finding],
+    gates: dict[str, int],
+    *,
+    use_display: bool = False,
+) -> list[str]:
     """Fail when OWASP v2 tile score falls below minimum (100 = good polarity)."""
     if not gates:
         return []
-    by_key = {row["key"]: row for row in category_scores_v2(findings)}
+    by_key = {row["key"]: row for row in category_scores_v2(findings, use_display=use_display)}
     failures: list[str] = []
     for category, minimum in gates.items():
         row = by_key.get(category)
@@ -526,7 +587,7 @@ def category_scores_v2_gate_failures(findings: list[Finding], gates: dict[str, i
     return failures
 
 
-def category_scores_v2(findings: list[Finding]) -> list[dict[str, Any]]:
+def category_scores_v2(findings: list[Finding], *, use_display: bool = False) -> list[dict[str, Any]]:
     """OWASP category health scores — 100 = good (RFC §4.15 polarity)."""
     from mcts.scoring.context import scorable_findings_v2
 
@@ -534,9 +595,16 @@ def category_scores_v2(findings: list[Finding]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key in CATEGORY_PRIORITY_V2:
         matched = [f for f in scorable if assign_category_v2(f.analyzer) == key]
-        penalty = sum(_CATEGORY_V2_PENALTY.get(f.severity, 5) for f in matched)
+        penalty = sum(
+            _CATEGORY_V2_PENALTY.get(
+                effective_severity(f) if use_display else f.severity,
+                5,
+            )
+            for f in matched
+        )
         score = max(0, 100 - min(100, penalty))
         passed = len(matched) == 0
+        benchmark = INDUSTRY_BENCHMARK_V2.get(key, 80)
         rows.append(
             {
                 "key": key,
@@ -545,16 +613,22 @@ def category_scores_v2(findings: list[Finding]) -> list[dict[str, Any]]:
                 "display": "100/100" if passed else f"{score}/100",
                 "findings_count": len(matched),
                 "passed": passed,
+                "benchmark": benchmark,
             }
         )
     return rows
 
 
-def category_gate_failures(findings: list[Finding], gates: dict[str, int]) -> list[str]:
+def category_gate_failures(
+    findings: list[Finding],
+    gates: dict[str, int],
+    *,
+    use_display: bool = False,
+) -> list[str]:
     """Return human-readable failures when a category score meets/exceeds its gate."""
     if not gates:
         return []
-    by_key = {row["key"]: row for row in category_scores(findings)}
+    by_key = {row["key"]: row for row in category_scores(findings, use_display=use_display)}
     failures: list[str] = []
     for category, limit in gates.items():
         row = by_key.get(category)
@@ -573,7 +647,7 @@ def owasp_mappings(findings: list[Finding]) -> list[dict[str, Any]]:
     return [row for row in llm_owasp_mappings(findings)["categories"] if row["status"] == "findings"]
 
 
-def llm_owasp_mappings(findings: list[Finding]) -> dict[str, Any]:
+def llm_owasp_mappings(findings: list[Finding], *, use_display: bool = False) -> dict[str, Any]:
     """OWASP LLM Top 10 coverage — mirrors compliance meta-findings."""
     scorable = [f for f in findings if f.analyzer != "compliance"]
     covered = {OWASP_LLM_ANALYZER_MAP[f.analyzer] for f in scorable if f.analyzer in OWASP_LLM_ANALYZER_MAP}
@@ -596,7 +670,9 @@ def llm_owasp_mappings(findings: list[Finding]) -> dict[str, Any]:
         )
         matched = [f for f in scorable if f.analyzer in analyzers]
         if matched:
-            max_sev = min(SEVERITY_ORDER[f.severity] for f in matched)
+            max_sev = min(
+                SEVERITY_ORDER[effective_severity(f) if use_display else f.severity] for f in matched
+            )
             severity = next(s for s in Severity if SEVERITY_ORDER[s] == max_sev)
             affected: set[str] = set()
             for finding in matched:
@@ -635,7 +711,12 @@ def llm_owasp_mappings(findings: list[Finding]) -> dict[str, Any]:
     }
 
 
-def mcp_owasp_mappings(findings: list[Finding], *, tools_discovered: int | None = None) -> dict[str, Any]:
+def mcp_owasp_mappings(
+    findings: list[Finding],
+    *,
+    tools_discovered: int | None = None,
+    use_display: bool = False,
+) -> dict[str, Any]:
     """OWASP MCP Top 10 coverage — mirrors compliance meta-findings."""
     scorable = [f for f in findings if f.analyzer != "compliance"]
     covered = {MCP_ANALYZER_MAP[f.analyzer] for f in scorable if f.analyzer in MCP_ANALYZER_MAP}
@@ -657,7 +738,9 @@ def mcp_owasp_mappings(findings: list[Finding], *, tools_discovered: int | None 
     for mcp_id, short_label, full_label, analyzers in _mcp_catalog():
         matched = [f for f in scorable if f.analyzer in analyzers]
         if matched:
-            max_sev = min(SEVERITY_ORDER[f.severity] for f in matched)
+            max_sev = min(
+                SEVERITY_ORDER[effective_severity(f) if use_display else f.severity] for f in matched
+            )
             severity = next(s for s in Severity if SEVERITY_ORDER[s] == max_sev)
             affected: set[str] = set()
             for finding in matched:
@@ -716,7 +799,7 @@ def build_capability_matrix(report: ScanReport) -> dict[str, Any]:
     }
 
 
-def build_technique_map(findings: list[Finding]) -> dict[str, Any]:
+def build_technique_map(findings: list[Finding], *, use_display: bool = False) -> dict[str, Any]:
     """Full MCTS-T catalog annotated with finding counts from this scan."""
     by_technique: dict[str, list[Finding]] = {}
     for finding in findings:
@@ -735,7 +818,9 @@ def build_technique_map(findings: list[Finding]) -> dict[str, Any]:
             "status": "detected" if matched else "clear",
         }
         if matched:
-            max_sev = min(SEVERITY_ORDER[f.severity] for f in matched)
+            max_sev = min(
+                SEVERITY_ORDER[effective_severity(f) if use_display else f.severity] for f in matched
+            )
             severity = next(s for s in Severity if SEVERITY_ORDER[s] == max_sev)
             row["risk_level"] = severity.value
         else:
@@ -746,7 +831,7 @@ def build_technique_map(findings: list[Finding]) -> dict[str, Any]:
     for tech_id, matched in sorted(by_technique.items()):
         if tech_id in catalog_ids:
             continue
-        max_sev = min(SEVERITY_ORDER[f.severity] for f in matched)
+        max_sev = min(SEVERITY_ORDER[effective_severity(f) if use_display else f.severity] for f in matched)
         severity = next(s for s in Severity if SEVERITY_ORDER[s] == max_sev)
         rows.append(
             {
@@ -788,7 +873,7 @@ def _enrich_analyzer_row(
 ) -> dict[str, Any]:
     counts = {s.value: 0 for s in Severity}
     for item in items:
-        counts[item.severity.value] += 1
+        counts[effective_severity(item).value] += 1
     info = analyzer_info(name)
     llm_full = OWASP_LLM_ANALYZER_MAP.get(name)
     mcp_full = MCP_ANALYZER_MAP.get(name)
@@ -896,13 +981,14 @@ def build_recommendations(findings: list[Finding]) -> list[dict[str, Any]]:
         if not key or key in seen:
             continue
         seen.add(key)
+        display = effective_severity(finding)
         rows.append(
             {
-                "priority": priority_map[finding.severity],
+                "priority": priority_map[display],
                 "title": finding.title,
                 "recommendation": finding.recommendation,
-                "impact": finding.severity.value.title(),
-                "effort": effort_map[finding.severity],
+                "impact": display.value.title(),
+                "effort": effort_map[display],
                 "analyzer": finding.analyzer,
                 "tool": finding.tool,
                 "mitigation_links": mitigation_links(finding.mitigation_ids),
@@ -953,15 +1039,22 @@ def score_trend(report: ScanReport) -> list[dict[str, Any]]:
             row["trend_value"] = _trend_value(row, series_key)
         return points
     label = report.scanned_at.strftime("%b %d")
+    trend_summary = (
+        (report.display_summary or report.summary) if report_trust_enforced(report) else report.summary
+    )
     row: dict[str, Any] = {
         "date": label,
         "score": report.score.overall,
         "scoring_version": report.scoring_version,
         "trend_value": report.score.overall,
-        "findings_total": report.summary.total,
-        "critical": report.summary.critical,
-        "high": report.summary.high,
+        "findings_total": trend_summary.total,
+        "critical": trend_summary.critical,
+        "high": trend_summary.high,
+        "findings_trust_mode": report.findings_trust_mode,
     }
+    if report.display_summary is not None:
+        row["display_critical"] = report.display_summary.critical
+        row["display_high"] = report.display_summary.high
     if report.score_v2 is not None:
         row["absolute_risk"] = report.score_v2.absolute_risk
         if report.score_v2.security_score is not None:
@@ -1007,6 +1100,7 @@ def _score_v2_payload(report: ScanReport) -> dict[str, Any] | None:
     if report.score_v2 is None:
         return None
     score = report.score_v2
+    grade_score = score.security_score if score.security_score is not None else report.score.overall
     return {
         "absolute_risk": score.absolute_risk,
         "risk_range": list(score.risk_range),
@@ -1022,6 +1116,7 @@ def _score_v2_payload(report: ScanReport) -> dict[str, Any] | None:
         "chain_factor_mode": score.chain_factor_mode,
         "benchmark_corpus_version": score.benchmark_corpus_version,
         "basis": score.basis.model_dump(),
+        "grade": security_grade(grade_score),
     }
 
 
@@ -1067,10 +1162,13 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
     badge, level, score_brief = _primary_risk_header(report)
     executed = list(report.analyzers_executed) or sorted({f.analyzer for f in report.findings})
     analyzer_results = build_analyzer_results(report.findings, executed, report=report)
-    categories = category_scores(report.findings)
+    use_display = report_trust_enforced(report)
+    categories = category_scores(report.findings, use_display=use_display)
+    fact_cov = fact_coverage(report.findings) if report.findings_trust_mode != "off" else None
     checks_summary = build_checks_summary(analyzer_results, categories)
     analyzers_run = checks_summary["analyzers_run"] or max(len({f.analyzer for f in report.findings}), 6)
-    executive = build_executive_summary(report.findings, report.summary)
+    exec_summary = report.display_summary or report.summary
+    executive = build_executive_summary(report.findings, exec_summary)
     _append_passed_checks_summary(
         executive["paragraphs"],
         analyzers_executed=executed,
@@ -1085,7 +1183,15 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
         findings_rows.append(
             {
                 "id": finding.id,
-                "severity": finding.severity.value,
+                "severity": effective_severity(finding).value,
+                "template_severity": finding.severity.value,
+                "display_severity": effective_severity(finding).value,
+                "impact": effective_impact(finding).value,
+                "evidence_strength": finding.evidence_strength,
+                "evidence_type": finding.evidence_type,
+                "finding_type": finding.finding_type,
+                "rule_stability": finding.rule_stability,
+                "priority_score": finding.priority_score,
                 "title": finding.title,
                 "description": finding.description,
                 "category": ANALYZER_LABELS.get(finding.analyzer, finding.analyzer),
@@ -1097,8 +1203,29 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
                 "confidence": finding.confidence,
                 "confidence_display": format_confidence(finding.confidence),
                 "evidence": evidence,
+                "facts": evidence.get("facts") if isinstance(evidence.get("facts"), list) else [],
+                "confidence_factors": (
+                    evidence.get("confidence_factors")
+                    if isinstance(evidence.get("confidence_factors"), list)
+                    else []
+                ),
+                "interpretation": evidence.get("interpretation")
+                if isinstance(evidence.get("interpretation"), dict)
+                else None,
                 "evidence_summary": format_evidence_summary(evidence),
+                "counterfactual_remediation": (
+                    evidence.get("counterfactual_remediation")
+                    if isinstance(evidence.get("counterfactual_remediation"), dict)
+                    else None
+                ),
+                "false_positive_conditions": (
+                    evidence.get("false_positive_conditions")
+                    if isinstance(evidence.get("false_positive_conditions"), list)
+                    else []
+                ),
+                "evidence_tier": evidence.get("evidence_tier"),
                 "has_evidence": bool(evidence),
+                "has_provenance": bool(evidence.get("facts")),
                 "recommendation": finding.recommendation,
                 "technique_id": tid or "—",
                 "technique_url": technique_url(tid) if tid else None,
@@ -1118,6 +1245,9 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
         report.scan_scope,
         report.scan_scope.replace("_", " ").title(),
     )
+    grade_score = report.score.overall
+    if report.score_v2 is not None and report.score_v2.security_score is not None:
+        grade_score = report.score_v2.security_score
 
     return {
         "meta": {
@@ -1132,6 +1262,8 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
             "scan_scope": report.scan_scope,
             "scan_scope_label": scope_label,
             "tool_discovery_notice": report.tool_discovery_notice,
+            "findings_trust_mode": report.findings_trust_mode,
+            **({"fact_coverage": fact_cov} if fact_cov is not None else {}),
         },
         "scan_notes": list(report.scan_notes),
         "tool_discovery": tool_ctx,
@@ -1140,15 +1272,20 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
             "risk_index": report.score.risk_index,
             "raw_risk": report.score.raw_risk,
             "basis": report.score.basis.model_dump(),
-            "grade": security_grade(report.score.overall),
+            "grade": security_grade(grade_score),
             "breakdown": breakdown_payload,
         },
         **({"score_v2": _score_v2_payload(report)} if report.score_v2 is not None else {}),
         **(
-            {"category_scores_v2": category_scores_v2(report.findings)} if report.score_v2 is not None else {}
+            {"category_scores_v2": category_scores_v2(report.findings, use_display=use_display)}
+            if report.score_v2 is not None
+            else {}
         ),
         "scoring_version": report.scoring_version,
         "summary": report.summary.model_dump(),
+        "display_summary": (
+            report.display_summary.model_dump() if report.display_summary is not None else None
+        ),
         "risk": {
             "badge": badge,
             "level": level,
@@ -1169,9 +1306,13 @@ def build_dashboard_payload(report: ScanReport) -> dict[str, Any]:
         "tools": [{"name": t.name, "description": t.description} for t in report.server.tools],
         "analyzers": analyzer_results,
         "attack_graph": build_attack_graph(report),
-        "owasp": llm_owasp_mappings(report.findings),
-        "owasp_mcp": mcp_owasp_mappings(report.findings, tools_discovered=len(report.server.tools)),
-        "technique_map": build_technique_map(report.findings),
+        "owasp": llm_owasp_mappings(report.findings, use_display=use_display),
+        "owasp_mcp": mcp_owasp_mappings(
+            report.findings,
+            tools_discovered=len(report.server.tools),
+            use_display=use_display,
+        ),
+        "technique_map": build_technique_map(report.findings, use_display=use_display),
         "capability_matrix": build_capability_matrix(report),
         "recommendations": build_recommendations(report.findings),
         "techniques": technique_catalog(),

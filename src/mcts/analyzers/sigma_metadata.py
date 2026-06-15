@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.surface_context import scan_surfaces, surface_location, tool_for_surface, tool_name_for
 from mcts.analyzers.surfaces import ScanSurface, ScanSurfaceKind
 from mcts.mcp.models import MCPServerInfo, MCPTool
@@ -77,23 +78,27 @@ class SigmaMetadataAnalyzer(BaseAnalyzer):
                             continue
                         seen.add(finding_id)
                         findings.append(
-                            Finding(
-                                id=finding_id,
+                            build_analyzer_finding(
+                                finding_id=finding_id,
                                 analyzer=self.name,
                                 title=f"Sigma rule match on {surface.label}: {rule.title}",
                                 description=(
                                     f"MCTS Sigma pattern matched in {corpus_field} ({rule.technique_id})."
                                 ),
                                 severity=_LEVEL_TO_SEVERITY.get(rule.level.lower(), Severity.MEDIUM),
-                                tool=tool_name_for(surface),
                                 recommendation=(
                                     "Review matched metadata against MCTS guidance and "
                                     "sanitize MCP surface definitions before deployment."
                                 ),
+                                rule_id=rule.rule_id,
+                                match=pattern,
+                                field=field,
+                                tool=tool_name_for(surface),
+                                location=surface_location(surface),
                                 technique_id=rule.technique_id,
                                 confidence=0.8,
-                                location=surface_location(surface),
-                                evidence={
+                                snippet=text[:200] if text else None,
+                                extra_evidence={
                                     "sigma_rule_id": rule.rule_id,
                                     "sigma_field": field,
                                     "sigma_pattern": pattern,

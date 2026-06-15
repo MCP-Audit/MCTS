@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.surface_context import scan_surfaces, surface_location, tool_name_for
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
@@ -136,23 +137,26 @@ class LineJumpingAnalyzer(BaseAnalyzer):
             if not detect_line_jumping(text, context_position=0):
                 continue
             findings.append(
-                Finding(
-                    id=f"line-jump-{surface.label}",
+                build_analyzer_finding(
+                    finding_id=f"line-jump-{surface.label}",
                     analyzer=self.name,
                     title=f"Line jumping pattern on {surface.label}",
                     description=(
                         "MCP surface attempts to establish precedence over security directives (MCTS-T-1021)."
                     ),
                     severity=Severity.HIGH,
-                    tool=tool_name_for(surface),
                     recommendation=(
                         "Strip priority/override language from MCP surfaces; enforce "
                         "immutable system policy ordering."
                     ),
+                    rule_id="RULE_LINE_JUMPING",
+                    match=surface.label,
+                    field="surface_text",
+                    tool=tool_name_for(surface),
+                    location=surface_location(surface),
                     technique_id="MCTS-T-1021",
                     confidence=0.8,
-                    location=surface_location(surface),
-                    evidence={"type": "line_jumping", "surface": surface.kind.value},
+                    extra_evidence={"type": "line_jumping", "surface": surface.kind.value},
                 )
             )
         return findings

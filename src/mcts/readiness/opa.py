@@ -9,7 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from mcts.reporting.models import Finding, Severity
+from mcts.analyzers.finding_facts import build_hygiene_finding
+from mcts.reporting.models import Severity
 
 _DEFAULT_POLICIES = Path(__file__).resolve().parent / "policies"
 _SEVERITY_MAP = {
@@ -29,28 +30,31 @@ class OpaProvider:
     def is_available(self) -> bool:
         return self._opa_path is not None and self.policies_dir.exists()
 
-    def evaluate_tool(self, tool_def: dict[str, Any], tool_name: str) -> list[Finding]:
+    def evaluate_tool(self, tool_def: dict[str, Any], tool_name: str) -> list:
         if not self.is_available():
             return []
         facts = _create_tool_facts(tool_def, tool_name)
-        findings: list[Finding] = []
+        findings: list = []
         for policy_path in sorted(self.policies_dir.glob("*.rego")):
             for violation in _run_opa(self._opa_path or "opa", policy_path, facts):
                 raw_severity = str(violation.get("severity", "MEDIUM")).upper()
                 severity = _SEVERITY_MAP.get(raw_severity, Severity.MEDIUM)
                 policy = str(violation.get("policy", "unknown"))
+                message = str(violation.get("message", "OPA policy violation"))
                 findings.append(
-                    Finding(
-                        id=f"readiness-opa-{policy}-{tool_name}",
+                    build_hygiene_finding(
+                        finding_id=f"readiness-opa-{policy}-{tool_name}",
                         analyzer="readiness",
-                        title=f"OPA: {violation.get('message', 'Policy violation')} ({tool_name})",
-                        description=str(violation.get("message", "OPA policy violation")),
+                        title=f"OPA: {message} ({tool_name})",
+                        description=message,
                         severity=severity,
-                        tool=tool_name,
                         recommendation="Fix tool definition to satisfy readiness Rego policy.",
-                        technique_id=None,
+                        rule_id=f"OPA-{policy}",
+                        match=message,
+                        field="opa_policy",
+                        tool=tool_name,
                         confidence=0.8,
-                        evidence={
+                        extra_evidence={
                             "readiness_rule": f"OPA-{policy}",
                             "policy": policy,
                             "source": "opa",

@@ -164,6 +164,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 "src/mcts/cli/main.py" = ["UP045"]
 "tests/fixtures/behavioral-eval/**/*.py" = ["F821"]
+"scripts/validate_trust_layer.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mcts"]
