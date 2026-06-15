@@ -312,7 +312,7 @@ def detect_sigma_metadata_static(entry: dict[str, Any]) -> bool:
 
 def detect_embedding_secrets_static(entry: dict[str, Any]) -> bool:
     findings = EmbeddingSecretsAnalyzer(semantic_secrets=True).analyze(_static_server(entry))
-    return any(f.analyzer == "embedding_secrets" for f in findings)
+    return any(f.analyzer == "embedding_secrets" and not (f.evidence or {}).get("skipped") for f in findings)
 
 
 def detect_shadowing_case(entry: dict[str, Any]) -> bool:

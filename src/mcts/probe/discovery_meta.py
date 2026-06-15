@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mcts.analyzers.finding_facts import build_hygiene_finding
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
 from mcts.scoring.evidence_tags import tag_live_discovery_finding
@@ -44,8 +45,8 @@ def discovery_meta_findings(server: MCPServerInfo) -> list[Finding]:
 
     return [
         tag_live_discovery_finding(
-            Finding(
-                id="live-discovery-incomplete",
+            build_hygiene_finding(
+                finding_id="live-discovery-incomplete",
                 analyzer="live_discovery",
                 title="Live MCP discovery incomplete",
                 description=description,
@@ -56,13 +57,16 @@ def discovery_meta_findings(server: MCPServerInfo) -> list[Finding]:
                     "for diagnostics. Use --strict-live in CI to fail the scan when discovery "
                     "is incomplete."
                 ),
-                evidence={
+                rule_id="LIVE-DISCOVERY",
+                match=description[:120],
+                field="discovery_warnings",
+                confidence=1.0,
+                extra_evidence={
                     "discovery_mode": server.discovery_mode,
                     "discovery_warnings": list(server.discovery_warnings),
                     "tool_count": len(server.tools),
                     "initialize_succeeded": server.initialize_succeeded,
                 },
-                confidence=1.0,
             )
         )
     ]

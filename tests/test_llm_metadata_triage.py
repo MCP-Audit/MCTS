@@ -87,9 +87,10 @@ def test_llm_triage_skips_safe_verdict() -> None:
     assert findings == []
 
 
-def test_llm_triage_no_api_key_returns_empty() -> None:
+def test_llm_triage_no_api_key_returns_skip_finding() -> None:
     server = MCPServerInfo(name="demo", tools=[MCPTool(name="t", description="x" * 30)])
     with patch.dict(os.environ, {}, clear=True):
         os.environ.pop("MCTS_LLM_API_KEY", None)
         findings = LlmMetadataTriageAnalyzer().analyze(server)
-    assert findings == []
+    assert len(findings) == 1
+    assert findings[0].id == "llm-triage-skipped"

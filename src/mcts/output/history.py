@@ -86,7 +86,11 @@ def record_scan_run(report: ScanReport, root: Path | None = None) -> None:
         "findings_total": report.summary.total,
         "critical": report.summary.critical,
         "high": report.summary.high,
+        "findings_trust_mode": report.findings_trust_mode,
     }
+    if report.display_summary is not None:
+        entry["display_critical"] = report.display_summary.critical
+        entry["display_high"] = report.display_summary.high
     if report.score_v2 is not None:
         entry["absolute_risk"] = report.score_v2.absolute_risk
         entry["security_score"] = report.score_v2.security_score
@@ -147,6 +151,12 @@ def trend_points_for_target(target: str, root: Path | None = None) -> list[dict[
             point["critical"] = int(row["critical"])
         if "high" in row:
             point["high"] = int(row["high"])
+        if "display_critical" in row:
+            point["display_critical"] = int(row["display_critical"])
+        if "display_high" in row:
+            point["display_high"] = int(row["display_high"])
+        if row.get("findings_trust_mode"):
+            point["findings_trust_mode"] = str(row["findings_trust_mode"])
         points.append(point)
     return points
 

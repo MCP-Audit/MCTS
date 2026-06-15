@@ -11,6 +11,8 @@ from mcts.inventory.models import InventoryEntry, InventoryReport
 from mcts.inventory.runner import run_inventory
 from mcts.inventory.targets import entry_to_scan_config
 from mcts.output.analysis_dir import resolve_output_path
+from mcts.reporting.display import summary_for_gates
+from mcts.reporting.models import ScanReport
 
 
 def run_inventory_scan_all(base_config: ScanConfig) -> tuple[InventoryReport, list[dict]]:
@@ -39,6 +41,48 @@ def run_inventory_scan_all(base_config: ScanConfig) -> tuple[InventoryReport, li
             row_payload["risk_level"] = report.score_v2.risk_level
         rows.append(_row(entry, **row_payload))
     return inventory, rows
+
+
+def collect_scan_all_gate_violations(base_config: ScanConfig, rows: list[dict]) -> list[str]:
+    """Policy/CLI gate failures across inventory scan-all rows."""
+    from mcts.governance.gate_violations import (
+        collect_fleet_absolute_risk_violations,
+        collect_gate_violations,
+    )
+
+    violations: list[str] = []
+    worst_risk: int | None = None
+    for row in rows:
+        report_data = row.get("report")
+        if not report_data or row.get("error"):
+            continue
+        report = ScanReport.model_validate(report_data)
+        scan_config = base_config.model_copy(update={"target": report.target})
+        violations.extend(collect_gate_violations(report, scan_config))
+        if report.score_v2 is not None:
+            ar = report.score_v2.absolute_risk
+            worst_risk = ar if worst_risk is None else max(worst_risk, ar)
+        elif row.get("absolute_risk") is not None:
+            ar = int(row["absolute_risk"])
+            worst_risk = ar if worst_risk is None else max(worst_risk, ar)
+    violations.extend(collect_fleet_absolute_risk_violations(worst_risk, base_config))
+    return violations
+
+
+def scan_all_has_high_severity(base_config: ScanConfig, rows: list[dict]) -> bool:
+    """Critical/high heuristic when no explicit gate fired (aligned with machine-wide)."""
+    for row in rows:
+        report_data = row.get("report")
+        if not report_data or row.get("error"):
+            continue
+        report = ScanReport.model_validate(report_data)
+        scan_config = base_config.model_copy(update={"target": report.target})
+        if report.score_v2 is not None and report.score_v2.risk_level in {"high", "critical"}:
+            return True
+        gate_summary = summary_for_gates(report, scan_config)
+        if gate_summary.critical or gate_summary.high:
+            return True
+    return False
 
 
 def write_inventory_scan_all(path: Path, inventory: InventoryReport, rows: list[dict]) -> None:

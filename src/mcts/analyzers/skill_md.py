@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.analyzers.tpa_patterns import find_control_chars, has_ansi_smuggling, has_hidden_unicode
 from mcts.inventory.models import SkillEntry
 from mcts.mcp.models import AgentSkillFile, MCPServerInfo
@@ -109,17 +110,22 @@ def _finding(
     *,
     evidence: dict | None = None,
 ) -> Finding:
-    payload = {"issue_code": code, "skill_path": entry.skill_path, "client": entry.client}
+    extra = {"issue_code": code, "skill_path": entry.skill_path, "client": entry.client}
     if evidence:
-        payload.update(evidence)
-    return Finding(
-        id=f"skill-md-{entry.skill_name}-{label}",
+        extra.update(evidence)
+    return build_analyzer_finding(
+        finding_id=f"skill-md-{entry.skill_name}-{label}",
         analyzer="skill_md",
         title=title,
         description=f"Skill `{entry.skill_name}` ({entry.client}) contains suspicious instruction content.",
         severity=Severity.HIGH,
         recommendation="Review SKILL.md for prompt injection, exfil instructions, or credential harvesting.",
-        technique_id="MCTS-T-1001",
+        rule_id=f"RULE_SKILL_{code}",
+        match=label,
+        field="skill_md",
         location=SourceLocation(file=entry.skill_path, line=1),
-        evidence=payload,
+        technique_id="MCTS-T-1001",
+        confidence=0.85,
+        snippet=title,
+        extra_evidence=extra,
     )

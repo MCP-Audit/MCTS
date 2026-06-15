@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcts.analyzers.finding_facts import build_hygiene_finding
 from mcts.mcp.models import MCPTool
 from mcts.reporting.models import Finding, Severity
 
@@ -41,7 +42,9 @@ def check_tool_readiness(tool: MCPTool) -> list[Finding]:
     return findings
 
 
-def readiness_score(findings: list[Finding]) -> int:
+def readiness_score(findings: list[Finding], *, use_display: bool = False) -> int:
+    from mcts.reporting.display import effective_severity
+
     deductions = {
         Severity.CRITICAL: 25,
         Severity.HIGH: 15,
@@ -50,7 +53,8 @@ def readiness_score(findings: list[Finding]) -> int:
     }
     score = 100
     for finding in findings:
-        score -= deductions.get(finding.severity, 0)
+        severity = effective_severity(finding) if use_display else finding.severity
+        score -= deductions.get(severity, 0)
     return max(0, score)
 
 
@@ -63,17 +67,18 @@ def _tool_def(tool: MCPTool) -> dict[str, Any]:
 
 
 def _finding(tool_name: str, rule_id: str, title: str, severity: Severity, **evidence: Any) -> Finding:
-    return Finding(
-        id=f"readiness-{rule_id.lower()}-{tool_name}",
+    return build_hygiene_finding(
+        finding_id=f"readiness-{rule_id.lower()}-{tool_name}",
         analyzer="readiness",
         title=f"{title} ({tool_name})",
         description=title,
         severity=severity,
-        tool=tool_name,
         recommendation="Improve MCP tool operational documentation and configuration.",
-        technique_id=None,
-        confidence=0.7,
-        evidence={"readiness_rule": rule_id.upper(), **evidence},
+        rule_id=rule_id.upper(),
+        match=title,
+        field="tool_metadata",
+        tool=tool_name,
+        extra_evidence={"readiness_rule": rule_id.upper(), **evidence},
     )
 
 

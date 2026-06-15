@@ -47,6 +47,16 @@ class Finding(BaseModel):
     cwe_id: str | None = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     location: SourceLocation | None = None
+    # Trust layer (Phase A) — optional until validator populates them
+    impact: Severity | None = None
+    evidence_strength: str | None = None
+    display_severity: Severity | None = None
+    priority_score: int | None = Field(default=None, ge=0, le=100)
+    finding_type: str | None = None
+    evidence_type: str | None = None
+    chain_level: int | None = Field(default=None, ge=0, le=3)
+    finding_kind: str | None = None
+    rule_stability: str | None = None
 
 
 class ScanSummary(BaseModel):
@@ -67,6 +77,23 @@ class ScanSummary(BaseModel):
             medium=counts[Severity.MEDIUM],
             low=counts[Severity.LOW],
             total=len(findings),
+        )
+
+    @classmethod
+    def from_display(cls, findings: list[Finding], *, security_only: bool = False) -> ScanSummary:
+        """Count findings by effective (display) severity."""
+        from mcts.reporting.display import effective_severity, is_security_finding
+
+        rows = [f for f in findings if is_security_finding(f)] if security_only else list(findings)
+        counts = {s: 0 for s in Severity}
+        for finding in rows:
+            counts[effective_severity(finding)] += 1
+        return cls(
+            critical=counts[Severity.CRITICAL],
+            high=counts[Severity.HIGH],
+            medium=counts[Severity.MEDIUM],
+            low=counts[Severity.LOW],
+            total=len(rows),
         )
 
 
@@ -110,6 +137,8 @@ class ScanReport(BaseModel):
     server: MCPServerInfo
     findings: list[Finding]
     summary: ScanSummary
+    display_summary: ScanSummary | None = None
+    findings_trust_mode: str = "off"
     score: RiskScore
     score_v2: RiskScoreV2 | None = None
     scoring_version: str = "legacy"

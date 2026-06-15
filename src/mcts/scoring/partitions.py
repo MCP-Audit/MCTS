@@ -21,11 +21,13 @@ def partition_findings(findings: list[Finding]) -> dict[ScoreBucket, list[Findin
     return buckets
 
 
-def score_partitioned(findings: list[Finding]) -> ScoreBreakdown:
+def score_partitioned(findings: list[Finding], *, use_display: bool = False) -> ScoreBreakdown:
     """Compute per-bucket scores and a weighted composite."""
     engine = RiskScoringEngine()
     buckets = partition_findings(findings)
-    scores: dict[ScoreBucket, RiskScore] = {bucket: engine.score(rows) for bucket, rows in buckets.items()}
+    scores: dict[ScoreBucket, RiskScore] = {
+        bucket: engine.score(rows, use_display=use_display) for bucket, rows in buckets.items()
+    }
     composite = round(sum(_COMPOSITE_WEIGHTS[bucket] * scores[bucket].overall for bucket in ScoreBucket))
     composite = max(0, min(100, composite))
     return ScoreBreakdown(

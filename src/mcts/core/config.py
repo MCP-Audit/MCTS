@@ -33,6 +33,7 @@ class ScanConfig(BaseModel):
     fail_on_critical: bool = False
     min_score: int | None = Field(default=None, ge=0, le=100)
     max_critical: int | None = Field(default=None, ge=0)
+    max_high: int | None = Field(default=None, ge=0)
     enable_jailbreak: bool = True
     enable_attack_chains: bool = True
     timeout_seconds: int = Field(default=120, ge=1)
@@ -131,6 +132,36 @@ class ScanConfig(BaseModel):
     max_absolute_risk: int | None = Field(default=None, ge=0)
     max_risk_level: str | None = None
     min_category_score_v2: dict[str, int] = Field(default_factory=dict)
+    max_worst_absolute_risk: int | None = Field(default=None, ge=0)
+    findings_trust_mode: str = "off"
+    findings_trust_mode_explicit: bool = False
+    ignore_policy: bool = False
+    fail_on_priority_min: int | None = Field(default=None, ge=0, le=100)
+    min_evidence_strength: str | None = None
+    enforce_bronze_facts: bool | None = None
+    collapse_template_severity: bool | None = None
+    require_auth_env_for_sensitive: bool = False
+    max_json_findings: int | None = Field(
+        default=None,
+        ge=1,
+        description="Truncate JSON report findings to this count (scan_notes records truncation)",
+    )
+
+    @classmethod
+    def _validate_min_evidence_strength(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from mcts.reporting.trust_gates import normalize_evidence_strength
+
+        return normalize_evidence_strength(value)
+
+    @field_validator("findings_trust_mode")
+    @classmethod
+    def _validate_findings_trust_mode(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"off", "warn", "enforce"}:
+            raise ValueError("findings_trust_mode must be off, warn, or enforce")
+        return normalized
 
     @field_validator("scoring_mode")
     @classmethod

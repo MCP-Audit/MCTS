@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from mcts.report.data import category_scores
+from mcts.reporting.display import effective_severity, report_trust_enforced
 from mcts.reporting.models import Finding, ScanReport, ScanSummary, Severity
 from mcts.ui.layout import FINDINGS_PANEL_MIN_WIDTH, SEVERITY_PANEL_WIDTH, content_width
 from mcts.ui.theme import SEVERITY_ORDER, Theme
@@ -38,8 +39,8 @@ class ScanDisplayMeta:
 
 
 def sort_findings(findings: list[Finding]) -> list[Finding]:
-    """Sort findings by severity (stable order within same severity)."""
-    return sorted(findings, key=lambda f: SEVERITY_ORDER[f.severity])
+    """Sort findings by display severity when set (stable order within same severity)."""
+    return sorted(findings, key=lambda f: (SEVERITY_ORDER[effective_severity(f)], f.title))
 
 
 def compute_owasp_counts(findings: list[Finding]) -> list[tuple[str, str, int]]:
@@ -119,10 +120,26 @@ def build_score_block(report: ScanReport, theme: Theme) -> Table:
     basis = report.score.basis
     rating, score_color = theme.score_rating(report.score.overall)
     risk_color = theme.risk_index_color(report.score.risk_index)
+    v2_first = report.score_v2 is not None and report.scoring_version == "both"
 
     grid = Table.grid(padding=(0, 1))
     grid.add_column(style=theme.style(p.white, bold=True), width=16, no_wrap=True)
     grid.add_column(justify="left")
+
+    if v2_first:
+        v2 = report.score_v2
+        grid.add_row(
+            "Absolute Risk:",
+            Text(
+                f"{v2.absolute_risk} ({v2.risk_level})",
+                style=theme.style(p.orange, bold=True),
+            ),
+        )
+        if v2.security_score is not None:
+            grid.add_row(
+                "Security Score:",
+                Text(f"{v2.security_score}/100", style=theme.style(p.yellow, bold=True)),
+            )
 
     grid.add_row(
         "Overall Score:",
@@ -141,7 +158,7 @@ def build_score_block(report: ScanReport, theme: Theme) -> Table:
             style=theme.style(p.white),
         ),
     )
-    if report.score_v2 is not None and report.scoring_version in {"v2", "both"}:
+    if report.score_v2 is not None and report.scoring_version in {"v2", "both"} and not v2_first:
         v2 = report.score_v2
         grid.add_row(
             "Absolute Risk:",
@@ -201,7 +218,8 @@ def build_category_breakdown(report: ScanReport, theme: Theme) -> Table:
     table.add_column("Score", justify="right", style=theme.style(p.yellow, bold=True))
     table.add_column("Findings", justify="right", style=theme.style(p.muted))
 
-    for row in category_scores(report.findings):
+    use_display = report_trust_enforced(report)
+    for row in category_scores(report.findings, use_display=use_display):
         table.add_row(row["label"], row["display"], str(row["findings_count"]))
     return table
 
@@ -246,8 +264,8 @@ def build_severity_panel(summary: ScanSummary, theme: Theme) -> Panel:
 def _format_finding_line(index: int, finding: Finding, theme: Theme, wrap_width: int) -> Text:
     """Format a single top finding entry with optional title wrap."""
     p = theme.palette
-    sev_color = theme.severity_color(finding.severity)
-    sev_label = theme.severity_label(finding.severity)
+    sev_color = theme.severity_color(effective_severity(finding))
+    sev_label = theme.severity_label(effective_severity(finding))
     indent = " " * 12
     first_line_budget = max(wrap_width - 12, 20)
     title = finding.title
@@ -352,11 +370,13 @@ def build_dashboard(
         build_category_breakdown(report, theme),
     ]
 
+    severity_summary = report.display_summary or report.summary
+
     if width >= 90:
         blocks.append(
             Columns(
                 [
-                    build_severity_panel(report.summary, theme),
+                    build_severity_panel(severity_summary, theme),
                     build_top_findings_panel(report.findings, theme, findings_width),
                 ],
                 width=width,
@@ -368,7 +388,7 @@ def build_dashboard(
     else:
         blocks.extend(
             [
-                build_severity_panel(report.summary, theme),
+                build_severity_panel(severity_summary, theme),
                 build_top_findings_panel(report.findings, theme, width - 4),
             ]
         )

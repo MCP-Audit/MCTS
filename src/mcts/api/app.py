@@ -51,7 +51,18 @@ class ScanRequest(BaseModel):
     semantic_secrets: bool = False
     runtime_events: list[dict[str, Any]] = Field(default_factory=list)
     fail_on_critical: bool = False
+    findings_trust_mode: Literal["off", "warn", "enforce"] = "off"
+    findings_trust_mode_explicit: bool = False
+    fail_on_priority_min: int | None = Field(default=None, ge=0, le=100)
+    min_evidence_strength: Literal["weak", "moderate", "strong", "verified"] | None = None
+    enforce_bronze_facts: bool | None = None
+    collapse_template_severity: bool | None = None
+    ignore_policy: bool = False
+    governance_policy: str | None = None
     min_score: int | None = Field(default=None, ge=0, le=100)
+    max_critical: int | None = Field(default=None, ge=0)
+    max_high: int | None = Field(default=None, ge=0)
+    fail_on_category: dict[str, int] = Field(default_factory=dict)
     scoring_mode: Literal["legacy", "v2", "both"] = "both"
     weights_profile: str = "manual_v1"
     corpus_stats_path: str | None = None
@@ -99,6 +110,10 @@ class ReadinessRequest(BaseModel):
     live: bool = False
     enable_opa: bool = False
     understand_live_risk: bool = False
+    findings_trust_mode: Literal["off", "warn", "enforce"] = "off"
+    findings_trust_mode_explicit: bool = False
+    ignore_policy: bool = False
+    governance_policy: str | None = None
 
 
 @app.get("/health")
@@ -117,40 +132,59 @@ def _build_config(req: ScanRequest, *, request: Request | None = None) -> ScanCo
         understand_live_risk=req.understand_live_risk,
         request=request,
     )
-    return ScanConfig(
-        target=Path(req.target),
-        live=req.live or bool(req.url),
-        remote_url=req.url,
-        remote_transport=req.transport,
-        bearer_token=req.bearer_token,
-        surfaces=req.surfaces,
-        resource_mime_allowlist=req.resource_mime_allowlist,
-        pip_audit=req.pip_audit,
-        protocol_probe=req.protocol_probe,
-        live_consent=live_consent,
-        hide_safe=req.hide_safe,
-        tool_filter=req.tool_filter,
-        analyzer_filter=req.analyzer_filter,
-        severity_filter=req.severity_filter,
-        analyzers=req.analyzers,
-        technique_filter=req.technique_filter,
-        semantic_secrets=req.semantic_secrets,
-        runtime_events=req.runtime_events,
-        fail_on_critical=req.fail_on_critical,
-        min_score=req.min_score,
-        scoring_mode=req.scoring_mode,
-        weights_profile=req.weights_profile,
-        corpus_stats_path=Path(req.corpus_stats_path) if req.corpus_stats_path else None,
-        min_security_score=req.min_security_score,
-        max_absolute_risk=req.max_absolute_risk,
-        max_risk_level=req.max_risk_level,
-        min_category_score_v2=req.min_category_score_v2,
-        assets_path=Path(req.assets_path) if req.assets_path else None,
-        oauth_client_id=req.oauth_client_id,
-        oauth_client_secret=req.oauth_client_secret,
-        oauth_token_url=req.oauth_token_url,
-        oauth_scopes=req.oauth_scopes,
+    return _merge_policy(
+        ScanConfig(
+            target=Path(req.target),
+            live=req.live or bool(req.url),
+            remote_url=req.url,
+            remote_transport=req.transport,
+            bearer_token=req.bearer_token,
+            surfaces=req.surfaces,
+            resource_mime_allowlist=req.resource_mime_allowlist,
+            pip_audit=req.pip_audit,
+            protocol_probe=req.protocol_probe,
+            live_consent=live_consent,
+            hide_safe=req.hide_safe,
+            tool_filter=req.tool_filter,
+            analyzer_filter=req.analyzer_filter,
+            severity_filter=req.severity_filter,
+            analyzers=req.analyzers,
+            technique_filter=req.technique_filter,
+            semantic_secrets=req.semantic_secrets,
+            runtime_events=req.runtime_events,
+            fail_on_critical=req.fail_on_critical,
+            findings_trust_mode=req.findings_trust_mode,
+            findings_trust_mode_explicit=req.findings_trust_mode_explicit,
+            fail_on_priority_min=req.fail_on_priority_min,
+            min_evidence_strength=req.min_evidence_strength,
+            enforce_bronze_facts=req.enforce_bronze_facts,
+            collapse_template_severity=req.collapse_template_severity,
+            ignore_policy=req.ignore_policy,
+            governance_policy=Path(req.governance_policy) if req.governance_policy else None,
+            min_score=req.min_score,
+            max_critical=req.max_critical,
+            max_high=req.max_high,
+            fail_on_category=req.fail_on_category,
+            scoring_mode=req.scoring_mode,
+            weights_profile=req.weights_profile,
+            corpus_stats_path=Path(req.corpus_stats_path) if req.corpus_stats_path else None,
+            min_security_score=req.min_security_score,
+            max_absolute_risk=req.max_absolute_risk,
+            max_risk_level=req.max_risk_level,
+            min_category_score_v2=req.min_category_score_v2,
+            assets_path=Path(req.assets_path) if req.assets_path else None,
+            oauth_client_id=req.oauth_client_id,
+            oauth_client_secret=req.oauth_client_secret,
+            oauth_token_url=req.oauth_token_url,
+            oauth_scopes=req.oauth_scopes,
+        )
     )
+
+
+def _merge_policy(config: ScanConfig) -> ScanConfig:
+    from mcts.reporting.trust_apply import resolve_config_with_policy
+
+    return resolve_config_with_policy(config)
 
 
 def _discover(req: ScanRequest, *, request: Request | None = None) -> MCPServerInfo:
@@ -172,12 +206,12 @@ def _scan_server(
         report: ScanReport = Scanner(config).analyze_server(server)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from mcts.governance.scan_gates import evaluate_scan_gate_violations
+    from mcts.governance.gate_violations import collect_gate_violations
 
     return ScanResponse(
         **report.model_dump(),
         scoring_mode=config.scoring_mode,
-        gate_violations=evaluate_scan_gate_violations(report, config),
+        gate_violations=collect_gate_violations(report, config),
     ).model_dump()
 
 
@@ -344,15 +378,21 @@ async def readiness(req: ReadinessRequest, request: Request) -> dict[str, Any]:
         understand_live_risk=req.understand_live_risk,
         request=request,
     )
-    config = ScanConfig(
-        target=Path(req.target),
-        live=req.live or bool(req.url),
-        remote_url=req.url,
-        live_consent=api_live_consent_granted(
-            understand_live_risk=req.understand_live_risk,
-            request=request,
-        ),
-        readiness_opa=req.enable_opa,
+    config = _merge_policy(
+        ScanConfig(
+            target=Path(req.target),
+            live=req.live or bool(req.url),
+            remote_url=req.url,
+            live_consent=api_live_consent_granted(
+                understand_live_risk=req.understand_live_risk,
+                request=request,
+            ),
+            readiness_opa=req.enable_opa,
+            findings_trust_mode=req.findings_trust_mode,
+            findings_trust_mode_explicit=req.findings_trust_mode_explicit,
+            ignore_policy=req.ignore_policy,
+            governance_policy=Path(req.governance_policy) if req.governance_policy else None,
+        )
     )
 
     def _run() -> dict[str, Any]:

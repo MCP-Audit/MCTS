@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mcts.analyzers.finding_facts import build_hygiene_finding, build_skip_finding
 from mcts.core.config import ScanConfig
 from mcts.core.scanner import Scanner
 from mcts.mcp.models import MCPTool
@@ -20,6 +21,9 @@ class ReadinessReport:
     tools_checked: int
     readiness_score: int
     production_ready: bool
+    score_v2_note: str | None = None
+    absolute_risk_snapshot: int | None = None
+    security_score_snapshot: int | None = None
 
 
 def run_readiness(config: ScanConfig) -> ReadinessReport:
@@ -30,8 +34,9 @@ def run_readiness(config: ScanConfig) -> ReadinessReport:
 
     if config.readiness_opa and (opa is None or not opa.is_available()):
         findings.append(
-            _optional_check_unavailable(
-                check_id="readiness-opa-unavailable",
+            build_skip_finding(
+                finding_id="readiness-opa-unavailable",
+                analyzer="readiness",
                 title="OPA readiness checks skipped",
                 description=_opa_unavailable_reason(opa),
                 recommendation=(
@@ -41,8 +46,9 @@ def run_readiness(config: ScanConfig) -> ReadinessReport:
         )
     if config.readiness_llm and (llm is None or not llm.is_available()):
         findings.append(
-            _optional_check_unavailable(
-                check_id="readiness-llm-unavailable",
+            build_skip_finding(
+                finding_id="readiness-llm-unavailable",
+                analyzer="readiness",
                 title="LLM readiness judge skipped",
                 description=_llm_unavailable_reason(),
                 recommendation=(
@@ -61,8 +67,8 @@ def run_readiness(config: ScanConfig) -> ReadinessReport:
 
     if not server.tools:
         findings.append(
-            Finding(
-                id="readiness-no-tools-discovered",
+            build_hygiene_finding(
+                finding_id="readiness-no-tools-discovered",
                 analyzer="readiness",
                 title="No MCP tools discovered",
                 description=(
@@ -75,34 +81,67 @@ def run_readiness(config: ScanConfig) -> ReadinessReport:
                     "Point readiness at an MCP server entrypoint, run static discovery on tool "
                     "sources, or export tools via mcts snapshot for offline scans."
                 ),
-                technique_id=None,
+                rule_id="HEUR-000",
+                match="no tools discovered",
+                field="discovery",
                 confidence=0.9,
-                evidence={"readiness_rule": "HEUR-000", "tools_discovered": 0},
+                extra_evidence={"readiness_rule": "HEUR-000", "tools_discovered": 0},
             )
         )
 
     if not server.version or server.version == "0.0.0":
         findings.append(
-            Finding(
-                id="readiness-server-version",
+            build_hygiene_finding(
+                finding_id="readiness-server-version",
                 analyzer="readiness",
                 title="Server version not specified",
                 description="MCP server does not expose a meaningful version string.",
                 severity=Severity.LOW,
                 recommendation="Set server version for operational traceability.",
-                technique_id=None,
+                rule_id="HEUR-014",
+                match="missing server version",
+                field="server_metadata",
                 confidence=0.6,
-                evidence={"readiness_rule": "HEUR-014"},
+                extra_evidence={"readiness_rule": "HEUR-014"},
             )
         )
 
-    score = readiness_score(findings)
+    from mcts.reporting.display import effective_severity
+    from mcts.reporting.trust_apply import apply_config_trust_layer
+
+    findings = apply_config_trust_layer(findings, config, scan_scope="readiness", tools=server.tools)
+    use_display = config.findings_trust_mode != "off"
+    score = readiness_score(findings, use_display=use_display)
     production_ready = (
-        bool(server.tools) and score >= 70 and not any(f.severity == Severity.CRITICAL for f in findings)
+        bool(server.tools)
+        and score >= 70
+        and not any(
+            (effective_severity(f) if use_display else f.severity) == Severity.CRITICAL for f in findings
+        )
     )
     for finding in findings:
         finding.evidence.setdefault("readiness_score", score)
         finding.evidence.setdefault("production_ready", production_ready)
+
+    score_v2_note = None
+    absolute_risk_snapshot = None
+    security_score_snapshot = None
+    if config.scoring_mode in ("v2", "both"):
+        score_v2_note = (
+            "Readiness readiness_score is separate from mcts scan v2 absolute_risk. "
+            "absolute_risk_snapshot scores readiness findings only (not a full scan)."
+        )
+        from mcts.governance.gate_violations import build_gate_scan_report
+
+        gate_report = build_gate_scan_report(
+            findings,
+            config,
+            target=str(config.target),
+            scan_scope="readiness",
+        )
+        if gate_report.score_v2 is not None:
+            absolute_risk_snapshot = gate_report.score_v2.absolute_risk
+            security_score_snapshot = gate_report.score_v2.security_score
 
     return ReadinessReport(
         target=str(config.target),
@@ -110,6 +149,9 @@ def run_readiness(config: ScanConfig) -> ReadinessReport:
         tools_checked=len(server.tools),
         readiness_score=score,
         production_ready=production_ready,
+        score_v2_note=score_v2_note,
+        absolute_risk_snapshot=absolute_risk_snapshot,
+        security_score_snapshot=security_score_snapshot,
     )
 
 
@@ -128,16 +170,13 @@ def _optional_check_unavailable(
     description: str,
     recommendation: str,
 ) -> Finding:
-    return Finding(
-        id=check_id,
+    return build_skip_finding(
+        finding_id=check_id,
         analyzer="readiness",
         title=title,
         description=description,
-        severity=Severity.MEDIUM,
         recommendation=recommendation,
-        technique_id=None,
-        confidence=1.0,
-        evidence={"skipped": True, "optional_check": True},
+        severity=Severity.MEDIUM,
     )
 
 

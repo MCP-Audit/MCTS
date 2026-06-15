@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcts.reporting.display import effective_impact, effective_severity
 from mcts.reporting.models import Finding, ScanReport, Severity
 from mcts.taxonomy.mapper import load_taxonomy
 
@@ -34,10 +35,35 @@ def write_sarif_report(report: ScanReport) -> str:
     return json.dumps(payload, indent=2)
 
 
-def build_sarif(report: ScanReport) -> dict[str, Any]:
-    rules = _build_rules(report.findings)
-    results = [_finding_to_result(finding, rules, report.target) for finding in report.findings]
-    taxonomies = _build_taxonomies(report.findings)
+def build_sarif(report: ScanReport, *, include_coverage_findings: bool = False) -> dict[str, Any]:
+    export_findings = report.findings
+    if not include_coverage_findings:
+        export_findings = [
+            finding for finding in report.findings if (finding.finding_kind or "security") != "coverage"
+        ]
+
+    contributor_map: dict[str, dict[str, Any]] = {}
+    if report.score_v2 is not None:
+        for contrib in report.score_v2.top_contributors:
+            if contrib.finding_id:
+                contributor_map[contrib.finding_id] = {
+                    "risk_contribution": contrib.risk_contribution,
+                    "confidence": contrib.confidence,
+                    "chain_factor": contrib.chain_factor,
+                    "factors": contrib.factors,
+                }
+
+    rules = _build_rules(export_findings)
+    results = [
+        _finding_to_result(
+            finding,
+            rules,
+            report.target,
+            contributor_map.get(finding.id),
+        )
+        for finding in export_findings
+    ]
+    taxonomies = _build_taxonomies(export_findings)
 
     driver: dict[str, Any] = {
         "name": "MCTS",
@@ -66,6 +92,18 @@ def build_sarif(report: ScanReport) -> dict[str, Any]:
             "securityScore": report.score_v2.security_score,
             "riskLevel": report.score_v2.risk_level,
         }
+        top_rows = [
+            {
+                "findingId": c.finding_id,
+                "riskContribution": c.risk_contribution,
+                "confidence": c.confidence,
+                "chainFactor": c.chain_factor,
+            }
+            for c in report.score_v2.top_contributors
+            if c.finding_id and c.risk_contribution is not None
+        ]
+        if top_rows:
+            run_props["mcts/v2TopContributors"] = top_rows[:10]
 
     run: dict[str, Any] = {
         "tool": {"driver": driver},
@@ -122,6 +160,13 @@ def _taxonomy_reference(taxon_id: str) -> dict[str, Any]:
     }
 
 
+def _sarif_security_severity(finding: Finding) -> str:
+    """Align GitHub security-severity with display when trust adjusted severity is set."""
+    if finding.display_severity is not None:
+        return SARIF_SECURITY_SEVERITY[effective_severity(finding)]
+    return SARIF_SECURITY_SEVERITY[effective_impact(finding)]
+
+
 def _build_rules(findings: list[Finding]) -> dict[str, dict[str, Any]]:
     rules: dict[str, dict[str, Any]] = {}
     for finding in findings:
@@ -137,25 +182,43 @@ def _build_rules(findings: list[Finding]) -> dict[str, dict[str, Any]]:
             "properties": {
                 "analyzer": finding.analyzer,
                 "technique_id": finding.technique_id,
-                "security-severity": SARIF_SECURITY_SEVERITY[finding.severity],
+                "security-severity": _sarif_security_severity(finding),
             },
         }
     return rules
 
 
-def _finding_to_result(finding: Finding, rules: dict[str, dict[str, Any]], target: str) -> dict[str, Any]:
+def _finding_to_result(
+    finding: Finding,
+    rules: dict[str, dict[str, Any]],
+    target: str,
+    v2_contrib: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "ruleId": finding.id,
-        "level": SARIF_SEVERITY[finding.severity],
+        "level": SARIF_SEVERITY[effective_severity(finding)],
         "message": {"text": finding.description},
         "locations": [_result_location(finding, target)],
         "properties": {
             "severity": finding.severity.value,
+            "display_severity": effective_severity(finding).value,
             "analyzer": finding.analyzer,
             "recommendation": finding.recommendation,
             "confidence": finding.confidence,
         },
     }
+    if finding.evidence_type:
+        result["properties"]["evidence_type"] = finding.evidence_type
+    evidence = finding.evidence or {}
+    facts = evidence.get("facts")
+    if isinstance(facts, list) and facts:
+        result["properties"]["mcts/factCount"] = len(facts)
+        result["properties"]["mcts/facts"] = facts[:5]
+    factors = evidence.get("confidence_factors")
+    if isinstance(factors, list) and factors:
+        result["properties"]["mcts/confidenceFactors"] = factors
+    if finding.rule_stability:
+        result["properties"]["mcts/ruleStability"] = finding.rule_stability
     taxa = _result_taxa(finding)
     if taxa:
         result["taxa"] = taxa
@@ -168,6 +231,13 @@ def _finding_to_result(finding: Finding, rules: dict[str, dict[str, Any]], targe
         result["properties"]["technique_id"] = finding.technique_id
     if finding.mitigation_ids:
         result["properties"]["mitigation_ids"] = finding.mitigation_ids
+    if v2_contrib is not None:
+        if v2_contrib.get("risk_contribution") is not None:
+            result["properties"]["mcts/v2RiskContribution"] = v2_contrib["risk_contribution"]
+        if v2_contrib.get("confidence") is not None:
+            result["properties"]["mcts/v2Confidence"] = v2_contrib["confidence"]
+        if v2_contrib.get("chain_factor") is not None:
+            result["properties"]["mcts/v2ChainFactor"] = v2_contrib["chain_factor"]
     if finding.id not in rules:
         rules[finding.id] = {
             "id": finding.id,
@@ -175,7 +245,7 @@ def _finding_to_result(finding: Finding, rules: dict[str, dict[str, Any]], targe
             "shortDescription": {"text": finding.title},
             "fullDescription": {"text": finding.description},
             "properties": {
-                "security-severity": SARIF_SECURITY_SEVERITY[finding.severity],
+                "security-severity": _sarif_security_severity(finding),
             },
         }
     return result

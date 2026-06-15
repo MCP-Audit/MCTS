@@ -75,6 +75,35 @@
     low: "Lower priority — minor risk",
   };
 
+  function findingSeverity(f) {
+    return f.display_severity || f.severity;
+  }
+
+  const EVIDENCE_MATURITY_LABELS = {
+    graph_path: "Proven path",
+    capability_overlap: "Overlap",
+  };
+
+  function evidenceMaturityChip(f) {
+    if (!f.evidence_type) return "";
+    const label = EVIDENCE_MATURITY_LABELS[f.evidence_type] || f.evidence_type.replace(/_/g, " ");
+    return `<span class="evidence-maturity-chip evidence-maturity-${escapeHtml(f.evidence_type)}" title="Evidence maturity">${escapeHtml(label)}</span>`;
+  }
+
+  function ruleStabilityChip(f) {
+    if (!f.rule_stability) return "";
+    const label = String(f.rule_stability);
+    return `<span class="rule-stability-chip rule-stability-${escapeHtml(label)}" title="Rule stability">${escapeHtml(label)}</span>`;
+  }
+
+  function trustEnforced() {
+    return (DATA.meta && DATA.meta.findings_trust_mode === "enforce") || false;
+  }
+
+  function activeSummary() {
+    return DATA.display_summary || DATA.summary || {};
+  }
+
   function scorePtsHtml(value) {
     return `<span class="score-pts-value">${value}</span><span class="score-pts-suffix"> / 100 pts</span>`;
   }
@@ -157,7 +186,7 @@
     const eyebrow = document.getElementById("hero-eyebrow");
     if (!statsEl) return;
 
-    const s = DATA.summary || {};
+    const s = activeSummary();
     const cs = DATA.checks_summary || {};
     const tools = DATA.meta?.tools_discovered || 0;
     const v2 = DATA.score_v2;
@@ -256,6 +285,7 @@
     fillV2Contributors(contributors);
     fillV2Categories(categories);
     initV2DimensionRadar(v2.dimension_scores || {});
+    initV2BenchmarkGauge(v2);
     const zoneRiskDetail = document.getElementById("zone-risk-detail");
     if (zoneRiskDetail) {
       zoneRiskDetail.hidden = !contributors.length && !categories.length;
@@ -275,16 +305,71 @@
     list.innerHTML = categories
       .map((c) => {
         const pct = Math.max(0, Math.min(100, Number(c.score) || 0));
+        const benchmark = Math.max(0, Math.min(100, Number(c.benchmark) || 0));
         const barColor = pct >= 80 ? COLORS.low : pct >= 50 ? COLORS.medium : COLORS.critical;
+        const benchHint = benchmark ? ` · corpus ~${benchmark}` : "";
         return `<li class="category-item">
           <div class="category-item-header">
             <span class="name">${escapeHtml(c.label)}</span>
-            <span class="score-val">${escapeHtml(c.display)}</span>
+            <span class="score-val">${escapeHtml(c.display)}${escapeHtml(benchHint)}</span>
           </div>
           <div class="category-bar"><span style="width:${pct}%;background:${barColor}"></span></div>
+          ${
+            benchmark
+              ? `<div class="category-benchmark-hint" style="font-size:11px;color:var(--muted);margin-top:4px">Benchmark reference: ${benchmark}/100 health</div>`
+              : ""
+          }
         </li>`;
       })
       .join("");
+  }
+
+  function initV2BenchmarkGauge(v2) {
+    const wrap = document.getElementById("v2-benchmark-gauge-wrap");
+    const canvas = document.getElementById("v2-gauge-chart");
+    const valueEl = document.getElementById("v2-gauge-score-value");
+    if (!wrap || !canvas || typeof Chart === "undefined") return;
+    if (v2.security_score == null) {
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    const score = Number(v2.security_score);
+    if (valueEl) valueEl.textContent = String(score);
+    const color = scoreGaugeColor(score);
+    const visualScore = Math.max(score, MIN_GAUGE_ARC);
+    const remainder = Math.max(0, 100 - visualScore);
+    const gradient = canvas.getContext("2d");
+    let fillColor = color;
+    if (gradient) {
+      const g = gradient.createLinearGradient(0, 0, 0, canvas.height);
+      g.addColorStop(0, color);
+      g.addColorStop(1, "rgba(239,68,68,0.25)");
+      fillColor = g;
+    }
+    new Chart(canvas, {
+      type: "doughnut",
+      data: {
+        datasets: [
+          {
+            data: [visualScore, remainder],
+            backgroundColor: [fillColor, "rgba(255,255,255,0.05)"],
+            borderWidth: 0,
+            borderRadius: 6,
+            circumference: 180,
+            rotation: 270,
+            spacing: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        cutout: "58%",
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        animation: { duration: 600 },
+      },
+    });
   }
 
   function fillV2Contributors(contributors) {
@@ -445,9 +530,18 @@
     const detailEl = document.getElementById("score-detail");
     const basis = DATA.score?.basis;
     if (detailEl && basis) {
+      const counts = basis;
+      const countLabel = trustEnforced()
+        ? "display severity"
+        : DATA.meta?.findings_trust_mode === "warn"
+          ? "template severity"
+          : "severity";
       detailEl.textContent =
-        `Calculated from ${basis.scorable_total} finding(s) by severity — ` +
-        `${basis.critical} critical, ${basis.high} high, ${basis.medium} medium, ${basis.low} low. ` +
+        `Calculated from ${basis.scorable_total} finding(s) by ${countLabel} — ` +
+        `${counts.critical ?? 0} critical, ${counts.high ?? 0} high, ${counts.medium ?? 0} medium, ${counts.low ?? 0} low. ` +
+        (DATA.meta?.findings_trust_mode === "warn"
+          ? "Legacy score uses template counts; summary cards preview display severity. Use enforce for aligned CI. "
+          : "") +
         `This is a security rating, not a pass rate.`;
     }
   }
@@ -465,7 +559,7 @@
   function fillMetricsHeadline() {
     const el = document.getElementById("metrics-headline");
     if (!el) return;
-    const s = DATA.summary || {};
+    const s = activeSummary();
     const score = DATA.score?.overall ?? 0;
     const tools = DATA.meta?.tools_discovered || 0;
     const cs = DATA.checks_summary || {};
@@ -511,7 +605,7 @@
   }
 
   function fillIssuesSummary() {
-    const s = DATA.summary || {};
+    const s = activeSummary();
     const totalEl = document.getElementById("issues-total");
     const totalFoot = document.getElementById("issues-table-total");
     const tbody = document.getElementById("issues-table-body");
@@ -827,7 +921,7 @@
     const quick = document.getElementById("quick-jump");
     if (!lead || !steps || !quick) return;
 
-    const s = DATA.summary || {};
+    const s = activeSummary();
     const cs = DATA.checks_summary || {};
     const score = DATA.score?.overall ?? 0;
     const total = s.total || 0;
@@ -891,7 +985,7 @@
   }
 
   function fillNavBadges() {
-    const s = DATA.summary || {};
+    const s = activeSummary();
     const cs = DATA.checks_summary || {};
     const findingsBadge = document.getElementById("nav-badge-findings");
     const analyzersBadge = document.getElementById("nav-badge-analyzers");
@@ -918,7 +1012,7 @@
 
     const severityRank = { critical: 0, high: 1, medium: 2, low: 3 };
     const topFindings = [...(DATA.findings || [])]
-      .sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9))
+      .sort((a, b) => (severityRank[findingSeverity(a)] ?? 9) - (severityRank[findingSeverity(b)] ?? 9))
       .slice(0, 6);
     const passed = (DATA.analyzers || []).filter((a) => a.status === "passed").slice(0, 6);
 
@@ -933,7 +1027,7 @@
           .map(
             (f) => `
         <li class="card-interactive" data-card-action="filter-search" data-card-value="${escapeHtml(f.title)}" tabindex="0" role="button" aria-label="View finding: ${escapeHtml(f.title)}">
-          <span class="sev-badge ${f.severity}">${f.severity}</span>
+          <span class="sev-badge ${findingSeverity(f)}">${findingSeverity(f)}</span>${evidenceMaturityChip(f)}
           <span class="overview-list-text">${escapeHtml(f.title)} <span class="row-cta">→</span></span>
         </li>`
           )
@@ -1023,11 +1117,16 @@
   }
 
   function initGaugeChart() {
-    if (DATA.score_v2) return;
     const canvas = document.getElementById("gauge-chart");
     if (!canvas || typeof Chart === "undefined") return;
 
-    const score = DATA.score.overall;
+    const v2 = DATA.score_v2;
+    const score =
+      v2 && v2.security_score != null
+        ? v2.security_score
+        : DATA.score.overall;
+    if (v2 && v2.security_score == null) return;
+
     const color = scoreGaugeColor(score);
     const visualScore = Math.max(score, MIN_GAUGE_ARC);
     const remainder = Math.max(0, 100 - visualScore);
@@ -1438,11 +1537,85 @@
       .join(" · ");
   }
 
-  function formatEvidenceBlock(evidence) {
-    if (!evidence || !Object.keys(evidence).length) {
+  function formatFactsTable(facts) {
+    if (!facts || !facts.length) return "";
+    const rows = facts
+      .map(
+        (fact) => `
+        <tr>
+          <td><code>${escapeHtml(fact.rule_id || "—")}</code></td>
+          <td>${escapeHtml(fact.tool || "—")}</td>
+          <td>${escapeHtml(fact.field || "—")}</td>
+          <td><code>${escapeHtml(fact.match || "—")}</code></td>
+          <td>${escapeHtml(fact.file || "—")}${fact.line ? `:${fact.line}` : ""}</td>
+        </tr>
+        ${fact.snippet ? `<tr class="finding-fact-snippet"><td colspan="5"><pre>${escapeHtml(fact.snippet)}</pre></td></tr>` : ""}`
+      )
+      .join("");
+    return `
+      <table class="finding-facts-table">
+        <thead><tr><th>Rule</th><th>Tool</th><th>Field</th><th>Match</th><th>Location</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function formatEvidenceBlock(finding) {
+    const evidence = finding.evidence || {};
+    const facts = finding.facts || evidence.facts || [];
+    const factors = finding.confidence_factors || evidence.confidence_factors || [];
+    const interpretation = finding.interpretation || evidence.interpretation;
+    if (!Object.keys(evidence).length && !facts.length) {
       return '<p class="finding-evidence-empty">No structured evidence recorded.</p>';
     }
-    return `<pre class="finding-evidence-json">${escapeHtml(JSON.stringify(evidence, null, 2))}</pre>`;
+    let html = "";
+    if (facts.length) {
+      html += `<div class="finding-evidence-section"><strong>Matched signals</strong>${formatFactsTable(facts)}</div>`;
+    }
+    if (factors.length) {
+      html += `<div class="finding-evidence-section"><strong>Confidence factors</strong><ul class="finding-confidence-list">${factors
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("")}</ul></div>`;
+    }
+    if (interpretation && interpretation.mcp_context) {
+      const ctx = interpretation.mcp_context;
+      html += `<div class="finding-evidence-section"><strong>MCP context</strong><p class="finding-mcp-context">${escapeHtml(
+        Object.entries(ctx)
+          .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`)
+          .join(" · ")
+      )}</p></div>`;
+    }
+    const counterfactual = evidence.counterfactual_remediation || finding.counterfactual_remediation;
+    if (counterfactual && (counterfactual.triggered_by || counterfactual.actions)) {
+      const triggers = counterfactual.triggered_by || [];
+      const actions = counterfactual.actions || [];
+      html += `<div class="finding-evidence-section"><strong>What triggered this</strong><ul class="finding-confidence-list">${triggers
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("")}</ul>`;
+      if (actions.length) {
+        html += `<strong>Remediation options</strong><ul class="finding-confidence-list">${actions
+          .map((row) => `<li>${escapeHtml(row.action || row.removes || "")}</li>`)
+          .join("")}</ul>`;
+      }
+      if (counterfactual.removing_any_one_eliminates_finding) {
+        html += `<p class="finding-mcp-context">Removing any one signal may clear this finding.</p>`;
+      }
+      html += `</div>`;
+    }
+    const fpConditions = finding.false_positive_conditions || evidence.false_positive_conditions;
+    if (fpConditions && fpConditions.length) {
+      html += `<div class="finding-evidence-section"><strong>False positive when</strong><ul class="finding-confidence-list">${fpConditions
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("")}</ul></div>`;
+    }
+    if (finding.evidence_tier || evidence.evidence_tier) {
+      html += `<p class="finding-mcp-context">Evidence tier: ${escapeHtml(
+        finding.evidence_tier || evidence.evidence_tier
+      )}</p>`;
+    }
+    html += `<details class="finding-evidence-raw"><summary>Raw evidence JSON</summary><pre class="finding-evidence-json">${escapeHtml(
+      JSON.stringify(evidence, null, 2)
+    )}</pre></details>`;
+    return html;
   }
 
   function renderFindingsTable() {
@@ -1466,16 +1639,16 @@
       );
     }
     if (filter !== "all") {
-      rows = rows.filter((f) => f.severity === filter);
+      rows = rows.filter((f) => findingSeverity(f) === filter);
     }
 
     tbody.innerHTML = rows
       .map(
         (f) => `
-      <tr class="finding-row${f.has_evidence ? " finding-row--expandable" : ""}" data-finding-id="${escapeHtml(f.id)}"${f.has_evidence ? ' tabindex="0" role="button" aria-expanded="false"' : ""}>
-        <td><span class="sev-badge ${f.severity}">${f.severity}</span></td>
+      <tr class="finding-row${f.has_evidence || f.has_provenance ? " finding-row--expandable" : ""}" data-finding-id="${escapeHtml(f.id)}"${f.has_evidence || f.has_provenance ? ' tabindex="0" role="button" aria-expanded="false"' : ""}>
+        <td><span class="sev-badge ${findingSeverity(f)}">${findingSeverity(f)}</span>${evidenceMaturityChip(f)}${ruleStabilityChip(f)}</td>
         <td><strong>${escapeHtml(f.title)}</strong><br><span style="color:var(--muted);font-size:12px">${escapeHtml(f.description)}</span>${
-          f.has_evidence
+          f.has_evidence || f.has_provenance
             ? `<div class="finding-expand-hint">${escapeHtml(f.evidence_summary || "View evidence")} <span class="row-cta">Details ↓</span></div>`
             : ""
         }</td>
@@ -1500,12 +1673,12 @@
             : ""
         }</td>
       </tr>${
-        f.has_evidence
+        f.has_evidence || f.has_provenance
           ? `<tr class="finding-detail-row" data-detail-for="${escapeHtml(f.id)}" hidden>
         <td colspan="10">
           <div class="finding-detail-panel">
             <strong>Evidence</strong> · confidence ${escapeHtml(f.confidence_display || "—")}
-            ${formatEvidenceBlock(f.evidence)}
+            ${formatEvidenceBlock(f)}
           </div>
         </td>
       </tr>`
@@ -1558,7 +1731,7 @@
     }
     DATA.findings.sort((a, b) => {
       let cmp = 0;
-      if (key === "severity") cmp = (order[a.severity] ?? 9) - (order[b.severity] ?? 9);
+      if (key === "severity") cmp = (order[findingSeverity(a)] ?? 9) - (order[findingSeverity(b)] ?? 9);
       else cmp = String(a[key] || "").localeCompare(String(b[key] || ""));
       return sortAsc ? cmp : -cmp;
     });

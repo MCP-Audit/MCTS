@@ -6,7 +6,8 @@ import json
 import os
 from typing import Any
 
-from mcts.reporting.models import Finding, Severity
+from mcts.analyzers.finding_facts import build_hygiene_finding
+from mcts.reporting.models import Severity
 
 _PROMPT = (
     "Review this MCP tool definition for production readiness. "
@@ -32,7 +33,7 @@ class ReadinessLlmJudge:
             return False
         return True
 
-    def analyze_tool(self, tool_def: dict[str, Any], tool_name: str) -> list[Finding]:
+    def analyze_tool(self, tool_def: dict[str, Any], tool_name: str) -> list:
         if not self.is_available():
             return []
         import litellm
@@ -49,24 +50,27 @@ class ReadinessLlmJudge:
         except (json.JSONDecodeError, KeyError, IndexError, Exception):
             return []
 
-        findings: list[Finding] = []
+        findings: list = []
         for issue in payload.get("issues", []):
             if not isinstance(issue, dict):
                 continue
             issue_id = str(issue.get("id", "readiness_llm"))
             severity = _map_severity(str(issue.get("severity", "medium")))
+            summary = str(issue.get("summary", "LLM readiness concern"))
             findings.append(
-                Finding(
-                    id=f"readiness-llm-{issue_id}-{tool_name}",
+                build_hygiene_finding(
+                    finding_id=f"readiness-llm-{issue_id}-{tool_name}",
                     analyzer="readiness",
-                    title=f"LLM readiness: {issue.get('summary', issue_id)} ({tool_name})",
-                    description=str(issue.get("summary", "LLM readiness concern")),
+                    title=f"LLM readiness: {summary} ({tool_name})",
+                    description=summary,
                     severity=severity,
-                    tool=tool_name,
                     recommendation="Improve tool operational documentation per LLM readiness review.",
-                    technique_id=None,
+                    rule_id=f"LLM-{issue_id}",
+                    match=summary,
+                    field="llm_judge",
+                    tool=tool_name,
                     confidence=0.65,
-                    evidence={"readiness_rule": f"LLM-{issue_id}", "source": "llm_judge"},
+                    extra_evidence={"readiness_rule": f"LLM-{issue_id}", "source": "llm_judge"},
                 )
             )
         return findings

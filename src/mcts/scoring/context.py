@@ -35,7 +35,12 @@ def build_scoring_context(
     w_hash = weights_hash(weights)
     graph = canonical_attack_graph_from_scan(attack_graph, findings, server.tools)
     scorable = scorable_findings_v2(findings)
-    chain_factors = resolve_chain_factors(scorable, graph) if chain_factor_mode == "paths_v1" else {}
+    use_display = config.findings_trust_mode == "enforce"
+    chain_factors = (
+        resolve_chain_factors(scorable, graph, use_display=use_display)
+        if chain_factor_mode == "paths_v1"
+        else {}
+    )
     corpus = None
     if config.corpus_stats_path:
         corpus = load_corpus_stats(Path(config.corpus_stats_path))
@@ -53,17 +58,23 @@ def build_scoring_context(
         chain_factor_mode=chain_factor_mode,
         last_absolute_risk=None,
         weights_hash=w_hash,
+        use_display_severity=use_display,
     )
 
 
 def rebuild_scoring_context_from_report(report: ScanReport, config: ScanConfig) -> ScoringContext:
     """Rebuild v2 context from a completed scan (corpus stats refresh)."""
     chain_factor_mode = "paths_v1" if config.enable_attack_chains else "disabled"
+    merged = config.model_copy(
+        update={
+            "findings_trust_mode": report.findings_trust_mode or config.findings_trust_mode,
+        }
+    )
     return build_scoring_context(
         findings=report.findings,
         server=report.server,
         attack_graph=report.attack_graph,
         scan_scope=report.scan_scope,
-        config=config,
+        config=merged,
         chain_factor_mode=chain_factor_mode,
     )

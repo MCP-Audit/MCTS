@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding, build_skip_finding
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
 
@@ -29,7 +30,15 @@ class VirusTotalAnalyzer(BaseAnalyzer):
         del server
         api_key = os.environ.get("MCTS_VT_API_KEY") or os.environ.get("VIRUSTOTAL_API_KEY")
         if not api_key:
-            return []
+            return [
+                build_skip_finding(
+                    finding_id="virustotal-skipped",
+                    analyzer=self.name,
+                    title="VirusTotal lookup skipped",
+                    description="MCTS_VT_API_KEY (or VIRUSTOTAL_API_KEY) is not set",
+                    recommendation="Export MCTS_VT_API_KEY or disable --enable-virustotal.",
+                )
+            ]
         root = self.target if self.target.is_dir() else self.target.parent
         findings: list[Finding] = []
         for path in _iter_binaries(root, self.max_files):
@@ -41,16 +50,19 @@ class VirusTotalAnalyzer(BaseAnalyzer):
             if malicious <= 0:
                 continue
             findings.append(
-                Finding(
-                    id=f"vt-{sha[:12]}",
+                build_analyzer_finding(
+                    finding_id=f"vt-{sha[:12]}",
                     analyzer=self.name,
                     title=f"VirusTotal detection: {path.name}",
                     description=f"{malicious} engine(s) flagged {path.name}",
                     severity=Severity.HIGH if malicious >= 3 else Severity.MEDIUM,
                     recommendation="Do not distribute or execute flagged binaries.",
+                    rule_id="RULE_VIRUSTOTAL",
+                    match=sha,
+                    field="binary_hash",
                     technique_id="MCTS-T-1038",
                     confidence=0.9,
-                    evidence={"path": str(path), "sha256": sha, "stats": stats},
+                    extra_evidence={"path": str(path), "sha256": sha, "stats": stats},
                 )
             )
         return findings

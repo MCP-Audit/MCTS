@@ -1,0 +1,37 @@
+# Example MCTS governance policy (copy to .mcts/policy.yaml)
+#
+# Legacy score and severity gates:
+min_score: 70
+max_critical: 0
+max_high: 5
+
+# Findings trust layer (honest overlap handling — recommended for MCP servers):
+findings_trust_mode: enforce
+
+# Option B priority gate — fail on high-priority findings with strong evidence only
+# (overlap chains typically stay below 80 with weak evidence):
+# fail_on_priority_min: 80
+# min_evidence_strength: strong
+
+# Bronze contract for experimental analyzers (requires evidence.facts):
+# enforce_bronze_facts: true
+
+# Phase B3 opt-in — collapse display into template severity (breaking for legacy JSON consumers):
+# collapse_template_severity: true
+
+# v2 gates (requires --scoring v2 or both):
+# min_security_score: 50
+# max_absolute_risk: 400
+# max_risk_level: high
+# max_worst_absolute_risk: 500
+# min_category_score_v2:
+#   injection: 80
+
+# Server allow/block lists:
+# allowed_servers:
+#   - my-mcp-server-name
+#   - ./examples/vulnerable-mcp-server/server.py
+# blocked_servers: []
+
+# Fail when sensitive opt-in analyzers are enabled without API credentials:
+# require_auth_env_for_sensitive: true

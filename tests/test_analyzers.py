@@ -18,6 +18,7 @@ def test_command_execution_detects_subprocess(example_server_path: Path) -> None
     assert any(f.tool == "run_shell" for f in findings)
     assert any(f.severity == Severity.CRITICAL for f in findings)
     assert any(f.technique_id == "MCTS-T-1003" for f in findings)
+    assert all(isinstance((f.evidence or {}).get("facts"), list) and f.evidence["facts"] for f in findings)
 
 
 def test_data_leakage_scans_source_files(example_server_path: Path) -> None:

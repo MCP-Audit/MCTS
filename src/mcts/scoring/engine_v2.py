@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from typing import Any
 
 from mcts.reporting.models import Finding
 from mcts.scoring.context import scorable_findings_v2
@@ -28,14 +29,17 @@ from mcts.scoring.uncertainty import (
 NON_SCORING_V2 = NON_SCORING_ANALYZERS | frozenset({"attack_chains"})
 
 
-def base_risk(finding: Finding, factors, weights: ScoringWeights) -> int:
-    severity_w = weights.severity[finding.severity.value]
+def base_risk(finding: Finding, factors, weights: ScoringWeights, *, use_display: bool = False) -> int:
+    from mcts.reporting.display import severity_for_scoring
+
+    severity = severity_for_scoring(finding, use_display=use_display)
+    severity_w = weights.severity[severity.value]
     return round(severity_w * bracket(factors))
 
 
 def finding_risk(finding: Finding, ctx: ScoringContext) -> int:
     factors = build_factor_vector(finding, ctx)
-    base = base_risk(finding, factors, ctx.weights)
+    base = base_risk(finding, factors, ctx.weights, use_display=ctx.use_display_severity)
     chain_factor = ctx.chain_factors.get(finding.id, 1.0)
     return math.floor(base * chain_factor + 0.5)
 
@@ -97,7 +101,7 @@ def build_top_contributors(
         key=lambda p: p.get("hop_count", 0),
         reverse=True,
     )
-    if paths and len(rows) < limit:
+    if paths and len(rows) < limit and _paths_are_proven(paths):
         path = paths[0]
         rows.append(
             TopContributor(
@@ -110,6 +114,13 @@ def build_top_contributors(
             )
         )
     return rows[:limit]
+
+
+def _paths_are_proven(paths: list[dict[str, Any]]) -> bool:
+    """Suppress overlap-only paths (hop_count < 2) from top contributors."""
+    from mcts.scoring.chains import path_is_proven
+
+    return any(path_is_proven(path) for path in paths)
 
 
 class RiskScoringEngineV2:
@@ -154,14 +165,18 @@ class RiskScoringEngineV2:
         scorable = scorable_findings_v2(ctx.findings)
         risks = [finding_risk(f, ctx) for f in scorable]
         absolute_risk = sum(risks)
-        risk_range, risk_range_confidence = compute_risk_range(absolute_risk, scorable, risks)
+        risk_range, risk_range_confidence = compute_risk_range(
+            absolute_risk, scorable, risks, use_display=ctx.use_display_severity
+        )
         conf = confidence_score(scorable, risks)
         contributors = build_top_contributors(ctx, scorable, risks)
         ctx_with_risk = replace(ctx, last_absolute_risk=absolute_risk)
         dimension_scores = compute_dimension_scores(ctx.findings, ctx_with_risk)
         severity_counts: dict[str, int] = {}
         for finding in scorable:
-            key = finding.severity.value
+            from mcts.reporting.display import severity_for_scoring
+
+            key = severity_for_scoring(finding, use_display=ctx.use_display_severity).value
             severity_counts[key] = severity_counts.get(key, 0) + 1
         excluded = len(ctx.findings) - len(scorable)
         basis = ScoreV2Basis(

@@ -60,14 +60,16 @@ class FuzzRunner:
             classified = classify_response(probe, response_text, process_exited=errored)
             if classified is None:
                 continue
-            finding = finding_from_classification(probe, classified)
+            finding = finding_from_classification(
+                probe,
+                classified,
+                response_excerpt=response_text[:500],
+                transport="http" if self._is_remote else None,
+                remote_url=self.config.remote_url if self._is_remote else None,
+            )
             if finding.id in seen:
                 continue
             seen.add(finding.id)
-            finding.evidence["response_excerpt"] = response_text[:500]
-            if self._is_remote:
-                finding.evidence["transport"] = "http"
-                finding.evidence["remote_url"] = self.config.remote_url
             findings.append(finding)
 
         return FuzzResult(findings=findings, probes_run=len(probes), level=level)

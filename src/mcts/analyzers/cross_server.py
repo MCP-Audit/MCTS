@@ -5,6 +5,7 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.inventory.models import InventoryEntry
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
@@ -41,16 +42,20 @@ class CrossServerAnalyzer(BaseAnalyzer):
                 continue
             servers = sorted({f"{client}/{server}" for client, server in locations})
             findings.append(
-                Finding(
-                    id=f"shadow-exact-{tool_name}",
+                build_analyzer_finding(
+                    finding_id=f"shadow-exact-{tool_name}",
                     analyzer=self.name,
                     title=f"Cross-server tool name collision: {tool_name}",
                     description=f"Tool '{tool_name}' appears on multiple MCP servers and may shadow intent.",
                     severity=Severity.HIGH,
-                    tool=tool_name,
                     recommendation="Rename tools to be server-specific or disable unused servers.",
+                    rule_id="RULE_CROSS_SERVER_COLLISION",
+                    match=tool_name,
+                    field="inventory_tool_name",
+                    tool=tool_name,
                     technique_id="MCTS-T-1008",
-                    evidence={"tool": tool_name, "servers": servers},
+                    confidence=0.8,
+                    extra_evidence={"tool": tool_name, "servers": servers},
                 )
             )
 
@@ -68,8 +73,8 @@ class CrossServerAnalyzer(BaseAnalyzer):
                     continue
                 seen_pairs.add(pair)
                 findings.append(
-                    Finding(
-                        id=f"shadow-similar-{left}-{right}",
+                    build_analyzer_finding(
+                        finding_id=f"shadow-similar-{left}-{right}",
                         analyzer=self.name,
                         title=f"Similar tool names may shadow: {left} / {right}",
                         description=(
@@ -77,8 +82,13 @@ class CrossServerAnalyzer(BaseAnalyzer):
                         ),
                         severity=Severity.MEDIUM,
                         recommendation="Differentiate tool names clearly across MCP servers.",
+                        rule_id="RULE_CROSS_SERVER_SIMILAR",
+                        match=f"{left}/{right}",
+                        field="inventory_tool_name",
+                        tool=left,
                         technique_id="MCTS-T-1008",
-                        evidence={
+                        confidence=0.75,
+                        extra_evidence={
                             "tool_a": left,
                             "tool_b": right,
                             "similarity": round(score, 2),

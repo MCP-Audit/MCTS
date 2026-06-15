@@ -49,6 +49,9 @@ def run_machine_wide_cli(
     if summary.scanned == 0:
         console.print("[yellow]No scannable MCP servers found in local client configs.[/yellow]")
         return 0
-    if summary.has_high_severity():
-        return 1
-    return 0
+    violations = summary.gate_violations()
+    if violations:
+        console.print("[red]Machine-wide gate failures:[/red]")
+        for item in violations:
+            console.print(f"  • {item}")
+    return summary.exit_code()

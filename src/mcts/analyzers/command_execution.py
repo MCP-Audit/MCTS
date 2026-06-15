@@ -6,7 +6,8 @@ import ast
 
 from mcts.analyzers.base import BaseAnalyzer
 from mcts.mcp.models import MCPServerInfo, MCPTool
-from mcts.reporting.models import Finding, Severity, SourceLocation
+from mcts.reporting.finding_builder import FindingBuilder
+from mcts.reporting.models import Finding, Severity
 from mcts.scoring.evidence_tags import tag_command_execution_finding
 
 DANGEROUS_CALLS: dict[str, tuple[str, Severity]] = {
@@ -52,18 +53,14 @@ class CommandExecutionAnalyzer(BaseAnalyzer):
             label, severity = DANGEROUS_CALLS[call_label]
             line = getattr(node, "lineno", tool.source_line)
             findings.append(
-                Finding(
-                    id=f"cmd-{tool.name}-{call_label.replace('.', '-')}",
-                    analyzer=self.name,
-                    title=f"Command execution in {tool.name}: {label}",
-                    description=f"Tool handler uses {label}, enabling arbitrary command execution.",
+                _cmd_finding(
+                    tool=tool,
+                    call_label=call_label,
+                    label=label,
                     severity=severity,
-                    tool=tool.name,
-                    recommendation="Remove shell execution; use allowlisted subprocess with argument lists.",
-                    technique_id="MCTS-T-1003",
-                    confidence=0.7,
-                    location=SourceLocation(file=tool.source_file, line=line),
-                    evidence={"call": call_label, "line": line},
+                    line=line,
+                    field="handler_ast",
+                    extra={"call": call_label, "line": line},
                 )
             )
         return findings
@@ -73,23 +70,67 @@ class CommandExecutionAnalyzer(BaseAnalyzer):
         for call, (label, severity) in DANGEROUS_CALLS.items():
             if call.replace(".", "") in snippet.replace(".", "") or call in snippet:
                 findings.append(
-                    Finding(
-                        id=f"cmd-{tool.name}-{call.replace('.', '-')}",
-                        analyzer=self.name,
-                        title=f"Command execution in {tool.name}: {label}",
-                        description=f"Tool handler appears to use {label}.",
+                    _cmd_finding(
+                        tool=tool,
+                        call_label=call,
+                        label=label,
                         severity=severity,
-                        tool=tool.name,
-                        recommendation=(
-                            "Remove shell execution; use allowlisted subprocess with argument lists."
-                        ),
-                        technique_id="MCTS-T-1003",
-                        confidence=0.7,
-                        location=SourceLocation(file=tool.source_file or "", line=tool.source_line),
-                        evidence={"call": call, "source": "snippet"},
+                        line=tool.source_line,
+                        field="handler_snippet",
+                        snippet=snippet[:160] if snippet else None,
+                        extra={"call": call, "source": "snippet"},
                     )
                 )
         return findings
+
+
+def _cmd_finding(
+    *,
+    tool: MCPTool,
+    call_label: str,
+    label: str,
+    severity: Severity,
+    line: int | None,
+    field: str,
+    snippet: str | None = None,
+    extra: dict | None = None,
+) -> Finding:
+    finding_id = f"cmd-{tool.name}-{call_label.replace('.', '-')}"
+    builder = (
+        FindingBuilder(
+            finding_id=finding_id,
+            analyzer="command_execution",
+            title=f"Command execution in {tool.name}: {label}",
+            description=(
+                f"Tool handler uses {label}, enabling arbitrary command execution."
+                if field == "handler_ast"
+                else f"Tool handler appears to use {label}."
+            ),
+            severity=severity,
+            recommendation="Remove shell execution; use allowlisted subprocess with argument lists.",
+        )
+        .tool(tool.name)
+        .technique("MCTS-T-1003")
+        .confidence(0.7)
+    )
+    if tool.source_file:
+        builder = builder.location(tool.source_file, line)
+    fact_kwargs: dict = {
+        "rule_id": "RULE_CMD_EXEC",
+        "match": call_label,
+        "field": field,
+        "tool": tool.name,
+    }
+    if tool.source_file:
+        fact_kwargs["file"] = tool.source_file
+    if line is not None:
+        fact_kwargs["line"] = line
+    if snippet:
+        fact_kwargs["snippet"] = snippet
+    builder = builder.fact(**fact_kwargs)
+    if extra:
+        builder = builder.evidence(**extra)
+    return builder.build()
 
 
 def _find_function(tree: ast.AST, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:

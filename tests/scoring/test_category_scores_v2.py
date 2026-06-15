@@ -33,6 +33,7 @@ def test_category_scores_v2_polarity_100_good() -> None:
     rows = category_scores_v2([])
     assert all(row["score"] == 100 for row in rows)
     assert all(row["passed"] for row in rows)
+    assert all("benchmark" in row for row in rows)
 
     rows = category_scores_v2([_finding("prompt_injection", Severity.CRITICAL)])
     injection = next(row for row in rows if row["key"] == "injection")

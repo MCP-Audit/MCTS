@@ -8,12 +8,23 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+class CapabilitySignal(BaseModel):
+    """One matched inferrer rule — provenance for capability dimensions."""
+
+    rule_id: str
+    dimension: str
+    field: str
+    match: str
+    snippet: str | None = None
+
+
 class CapabilityProfile(BaseModel):
     reads_untrusted_input: bool = False
     accesses_sensitive_data: bool = False
     mutates_state: bool = False
     egresses_network: bool = False
     executes_commands: bool = False
+    signals: list[CapabilitySignal] = Field(default_factory=list)
 
 
 def _coerce_json_dict(value: Any) -> dict[str, Any]:

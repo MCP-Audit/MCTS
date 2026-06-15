@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class GovernancePolicy(BaseModel):
@@ -15,11 +15,36 @@ class GovernancePolicy(BaseModel):
     max_absolute_risk: int | None = Field(default=None, ge=0)
     max_risk_level: str | None = Field(default=None)
     min_category_score_v2: dict[str, int] = Field(default_factory=dict)
+    max_worst_absolute_risk: int | None = Field(default=None, ge=0)
     max_critical: int | None = Field(default=None, ge=0)
     max_high: int | None = Field(default=None, ge=0)
+    fail_on_priority_min: int | None = Field(default=None, ge=0, le=100)
+    min_evidence_strength: str | None = None
+    enforce_bronze_facts: bool = False
+    collapse_template_severity: bool = False
+    findings_trust_mode: str | None = None
     allowed_servers: list[str] = Field(default_factory=list)
     blocked_servers: list[str] = Field(default_factory=list)
     require_auth_env_for_sensitive: bool = False
+
+    @field_validator("min_evidence_strength")
+    @classmethod
+    def _validate_policy_evidence_strength(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from mcts.reporting.trust_gates import normalize_evidence_strength
+
+        return normalize_evidence_strength(value)
+
+    @field_validator("findings_trust_mode")
+    @classmethod
+    def _validate_policy_trust_mode(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.lower().strip()
+        if normalized not in {"off", "warn", "enforce"}:
+            raise ValueError("findings_trust_mode must be off, warn, or enforce")
+        return normalized
 
 
 def load_policy(path: Path | None) -> GovernancePolicy | None:
@@ -40,56 +65,17 @@ def load_policy(path: Path | None) -> GovernancePolicy | None:
 def evaluate_policy(
     *,
     policy: GovernancePolicy,
-    score: int,
-    critical: int,
-    high: int,
     servers: list[str],
-    absolute_risk: int | None = None,
-    security_score: int | None = None,
-    risk_level: str | None = None,
-    findings: list | None = None,
 ) -> list[str]:
-    from mcts.report.data import category_scores_v2_gate_failures
+    """YAML-only gates not represented on ScanConfig (allowlist/blocklist).
 
-    _LEVEL_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    Numeric thresholds (min_score, max_critical, v2 limits, priority) merge into
+    ScanConfig via merge_scan_config_with_policy and are enforced by scan_gates only.
+    """
     violations: list[str] = []
-    if policy.min_score is not None and score < policy.min_score:
-        violations.append(f"legacy score {score} below minimum {policy.min_score}")
-    if policy.min_security_score is not None:
-        if security_score is None:
-            violations.append(
-                f"min_security_score {policy.min_security_score} requires v2 scoring "
-                "(use --scoring v2 or both)"
-            )
-        elif security_score < policy.min_security_score:
-            violations.append(f"security score {security_score} below minimum {policy.min_security_score}")
-    if policy.max_absolute_risk is not None:
-        if absolute_risk is None:
-            violations.append(
-                f"max_absolute_risk {policy.max_absolute_risk} requires v2 scoring (use --scoring v2 or both)"
-            )
-        elif absolute_risk > policy.max_absolute_risk:
-            violations.append(f"absolute risk {absolute_risk} exceeds maximum {policy.max_absolute_risk}")
-    if policy.max_risk_level is not None:
-        if risk_level is None:
-            violations.append(
-                f"max_risk_level {policy.max_risk_level!r} requires v2 scoring (use --scoring v2 or both)"
-            )
-        elif _LEVEL_ORDER.get(risk_level, 0) > _LEVEL_ORDER.get(policy.max_risk_level, 0):
-            violations.append(f"risk level {risk_level!r} exceeds maximum {policy.max_risk_level!r}")
-    if policy.min_category_score_v2:
-        if absolute_risk is None:
-            violations.append("min_category_score_v2 requires v2 scoring (use --scoring v2 or both)")
-        elif findings is not None:
-            violations.extend(category_scores_v2_gate_failures(findings, policy.min_category_score_v2))
-    if policy.max_critical is not None and critical > policy.max_critical:
-        violations.append(f"critical findings {critical} exceed max {policy.max_critical}")
-    if policy.max_high is not None and high > policy.max_high:
-        violations.append(f"high findings {high} exceed max {policy.max_high}")
-    if policy.allowed_servers:
-        for server in servers:
-            if server not in policy.allowed_servers:
-                violations.append(f"server {server!r} not in allowlist")
+    if policy.allowed_servers and not any(server in policy.allowed_servers for server in servers):
+        checked = ", ".join(repr(server) for server in servers)
+        violations.append(f"scan target not in allowlist (checked: {checked})")
     for server in policy.blocked_servers:
         if server in servers:
             violations.append(f"blocked server present: {server}")
@@ -103,3 +89,56 @@ def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
     if "blocklist" in row and "blocked_servers" not in row:
         row["blocked_servers"] = row.pop("blocklist")
     return row
+
+
+def merge_scan_config_with_policy(config: Any, policy: GovernancePolicy | None) -> Any:
+    """Fill unset scan config fields from governance policy (CLI flags take precedence).
+
+    Policy applies when the scan config still holds defaults (e.g. findings_trust_mode=off
+    without an explicit CLI choice, optional gates None). Explicit CLI values are never overwritten.
+    """
+    if policy is None or config.ignore_policy:
+        return config
+
+    updates: dict[str, Any] = {}
+
+    if (
+        not config.findings_trust_mode_explicit
+        and config.findings_trust_mode == "off"
+        and policy.findings_trust_mode is not None
+    ):
+        updates["findings_trust_mode"] = policy.findings_trust_mode
+
+    for field in (
+        "min_score",
+        "max_critical",
+        "max_high",
+        "fail_on_priority_min",
+        "min_evidence_strength",
+        "min_security_score",
+        "max_absolute_risk",
+        "max_risk_level",
+        "max_worst_absolute_risk",
+    ):
+        policy_value = getattr(policy, field)
+        if policy_value is None:
+            continue
+        if getattr(config, field) is None:
+            updates[field] = policy_value
+
+    if not config.min_category_score_v2 and policy.min_category_score_v2:
+        updates["min_category_score_v2"] = dict(policy.min_category_score_v2)
+
+    for field in ("enforce_bronze_facts", "collapse_template_severity"):
+        if getattr(config, field) is not None:
+            continue
+        if getattr(policy, field):
+            updates[field] = True
+
+    if not config.require_auth_env_for_sensitive and policy.require_auth_env_for_sensitive:
+        updates["require_auth_env_for_sensitive"] = True
+
+    if not updates:
+        return config
+
+    return config.model_copy(update=updates)

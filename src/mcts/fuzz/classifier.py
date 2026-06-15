@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.fuzz.payloads import FuzzProbe
-from mcts.reporting.models import Finding, Severity
+from mcts.reporting.models import Severity
 
 STACK_TRACE = re.compile(r"(Traceback \(most recent call last\)|Exception:|Error:|panic:)", re.I)
 PATH_ECHO = re.compile(r"(/etc/passwd|/etc/hosts|\.\./\.\./|file://)", re.I)
@@ -109,27 +110,41 @@ def classify_response(
     return None
 
 
-def finding_from_classification(probe: FuzzProbe, classified: ClassifiedResponse) -> Finding:
+def finding_from_classification(
+    probe: FuzzProbe,
+    classified: ClassifiedResponse,
+    *,
+    response_excerpt: str | None = None,
+    transport: str | None = None,
+    remote_url: str | None = None,
+):
     technique_id = "MCTS-T-1016" if probe.id.startswith("sampling-") else "MCTS-T-1009"
-    technique_id = "MCTS-T-1016" if probe.id.startswith("sampling-") else "MCTS-T-1009"
-    return Finding(
-        id=f"fuzz-{probe.id}-{classified.signal.value}",
+    extra: dict = {
+        "probe_id": probe.id,
+        "signal": classified.signal.value,
+        "read_only": probe.read_only,
+        "level": probe.level.value,
+        "attack_tags": (["attack.execution", "attack.t1499.003"] if probe.id.startswith("sampling-") else []),
+    }
+    if response_excerpt:
+        extra["response_excerpt"] = response_excerpt
+    if transport:
+        extra["transport"] = transport
+    if remote_url:
+        extra["remote_url"] = remote_url
+    return build_analyzer_finding(
+        finding_id=f"fuzz-{probe.id}-{classified.signal.value}",
         analyzer="fuzz",
         title=f"Fuzz probe issue: {probe.title}",
         description=classified.summary,
         severity=classified.severity,
         recommendation=_recommendation(classified.signal, probe),
+        rule_id=f"RULE_FUZZ_{classified.signal.value.upper()}",
+        match=classified.signal.value,
+        field="fuzz_response",
         technique_id=technique_id,
         confidence=0.75 if classified.signal == ResponseSignal.CLEAN_REJECTION else 0.85,
-        evidence={
-            "probe_id": probe.id,
-            "signal": classified.signal.value,
-            "read_only": probe.read_only,
-            "level": probe.level.value,
-            "attack_tags": (
-                ["attack.execution", "attack.t1499.003"] if probe.id.startswith("sampling-") else []
-            ),
-        },
+        extra_evidence=extra,
     )
 
 

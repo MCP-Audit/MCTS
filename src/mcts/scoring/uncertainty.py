@@ -39,11 +39,25 @@ def confidence_score(findings: list[Finding], per_finding_risks: list[int]) -> i
 
 
 def evidence_quality_factor(findings: list[Finding]) -> float:
-    tags = {t for f in findings for t in (f.evidence.get("risk_tags") or [])}
-    return 0.8 if {"live_probe", "handler_traced"} <= tags else 1.2
+    tags = {t for f in findings for t in ((f.evidence or {}).get("risk_tags") or [])}
+    if {"live_probe", "handler_traced"} <= tags:
+        return 0.8
+    for finding in findings:
+        if finding.finding_type != "validated":
+            continue
+        validation = (finding.evidence or {}).get("runtime_validation")
+        if validation in {"live_probe", "live_proxy"}:
+            return 0.8
+        if validation == "taint_param_sink":
+            facts = (finding.evidence or {}).get("facts") or []
+            if any(isinstance(row, dict) and row.get("snippet") for row in facts):
+                return 0.8
+    return 1.2
 
 
-def analyzer_disagreement_factor(findings: list[Finding]) -> float:
+def analyzer_disagreement_factor(findings: list[Finding], *, use_display: bool = False) -> float:
+    from mcts.reporting.display import effective_severity
+
     severities_by_tool: dict[str, set[str]] = {}
     for finding in findings:
         tool = finding.tool
@@ -53,7 +67,8 @@ def analyzer_disagreement_factor(findings: list[Finding]) -> float:
                 tool = str(affected[0])
         if not tool:
             continue
-        severities_by_tool.setdefault(tool, set()).add(finding.severity.value)
+        severity = effective_severity(finding) if use_display else finding.severity
+        severities_by_tool.setdefault(tool, set()).add(severity.value)
     if any(len(values) > 1 for values in severities_by_tool.values()):
         return 1.4
     return 1.0
@@ -63,6 +78,8 @@ def compute_risk_range(
     absolute_risk: int,
     findings: list[Finding],
     per_finding_risks: list[int],
+    *,
+    use_display: bool = False,
 ) -> tuple[tuple[int, int], str]:
     if absolute_risk == 0:
         return (0, 0), "high"
@@ -71,7 +88,11 @@ def compute_risk_range(
         sum(effective_confidence(f) * r for r, f in pairs) / sum(r for r, _ in pairs) if pairs else 1.0
     )
     base_spread = absolute_risk * (1 - mean_conf) * 0.35
-    spread = base_spread * evidence_quality_factor(findings) * analyzer_disagreement_factor(findings)
+    spread = (
+        base_spread
+        * evidence_quality_factor(findings)
+        * analyzer_disagreement_factor(findings, use_display=use_display)
+    )
     low = max(0, round(absolute_risk - spread))
     high = round(absolute_risk + spread)
     label = "high" if mean_conf >= 0.85 else "medium" if mean_conf >= 0.65 else "low"

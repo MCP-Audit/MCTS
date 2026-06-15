@@ -9,7 +9,8 @@ from pathlib import Path
 
 from mcts.analyzers.base import BaseAnalyzer
 from mcts.mcp.models import MCPServerInfo
-from mcts.reporting.models import Finding, Severity, SourceLocation
+from mcts.reporting.finding_builder import FindingBuilder
+from mcts.reporting.models import Finding, Severity
 
 _DEFAULT_RULES = Path(__file__).resolve().parents[1] / "sast" / "semgrep" / "rules" / "mcts-mcp.yaml"
 
@@ -94,23 +95,31 @@ def _findings_from_payload(payload: dict, *, analyzer: str) -> list[Finding]:
         col = int(start.get("col") or 0)
         slug = check_id.replace(".", "-").replace("/", "-")
         findings.append(
-            Finding(
-                id=f"semgrep-{slug}-{line}-{col}",
+            FindingBuilder(
+                finding_id=f"semgrep-{slug}-{line}-{col}",
                 analyzer=analyzer,
                 title=f"Semgrep: {check_id}",
                 description=message,
                 severity=_SEVERITY_MAP.get(raw_sev, Severity.MEDIUM),
                 recommendation="Review matched source for unsafe MCP tool handler behavior.",
-                technique_id=technique_id,
-                confidence=0.85,
-                location=SourceLocation(file=path, line=line, column=col),
-                evidence={
-                    "check_id": check_id,
-                    "path": path,
-                    "semgrep_severity": raw_sev,
-                    "category": metadata.get("category"),
-                },
             )
+            .technique(technique_id)
+            .confidence(0.85)
+            .location(path, line if line else None)
+            .fact(
+                rule_id=check_id,
+                match=message,
+                field="semgrep_match",
+                file=path or None,
+                line=line if line else None,
+            )
+            .evidence(
+                check_id=check_id,
+                path=path,
+                semgrep_severity=raw_sev,
+                category=metadata.get("category"),
+            )
+            .build()
         )
     if not findings:
         for err in payload.get("errors") or []:
@@ -120,8 +129,8 @@ def _findings_from_payload(payload: dict, *, analyzer: str) -> list[Finding]:
             if not message:
                 continue
             findings.append(
-                Finding(
-                    id="semgrep-skipped",
+                FindingBuilder(
+                    finding_id="semgrep-skipped",
                     analyzer=analyzer,
                     title="Semgrep scan skipped",
                     description=message,
@@ -130,10 +139,11 @@ def _findings_from_payload(payload: dict, *, analyzer: str) -> list[Finding]:
                         "Install the semgrep CLI (`uv sync --extra semgrep`) or remove --semgrep "
                         "when SAST is not required."
                     ),
-                    technique_id=None,
-                    confidence=1.0,
-                    evidence={"skipped": True, "reason": message},
+                    rule_stability="mature",
                 )
+                .confidence(1.0)
+                .evidence(skipped=True, reason=message)
+                .build(require_fact=False)
             )
             break
     return findings

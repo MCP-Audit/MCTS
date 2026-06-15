@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.inventory.hitting_set import minimum_hitting_set
 from mcts.inventory.models import InventoryEntry
 from mcts.mcp.models import MCPServerInfo
@@ -68,7 +69,10 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                     f"Toxic flow W015: read ({reader}) → write ({writer})",
                     "Cross-server read/write capability chain detected.",
                     Severity.HIGH,
+                    match=f"{reader} → {writer}",
+                    field="cross_server_read_write",
                     evidence={"reader": reader, "writer": writer},
+                    id_suffix=f"{reader}-{writer}",
                 )
             )
 
@@ -83,7 +87,10 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                     f"Toxic flow W016: sensitive tool shadow `{tool}`",
                     f"Tool `{tool}` is exposed on multiple servers.",
                     Severity.HIGH,
+                    match=tool,
+                    field="sensitive_tool_shadow",
                     evidence={"tool": tool, "servers": holders},
+                    id_suffix=tool,
                 )
             )
 
@@ -97,7 +104,10 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                     f"Toxic flow W017: sensitive tools without auth env ({key})",
                     "Server exposes sensitive tools but declares no auth-related env keys.",
                     Severity.MEDIUM,
+                    match=key,
+                    field="missing_auth_env",
                     evidence={"server": key, "tools": sorted(tools & _SENSITIVE_TOOLS)},
+                    id_suffix=key,
                 )
             )
 
@@ -114,7 +124,10 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                     f"Toxic flow W018: duplicate server name `{name}`",
                     "Same server name appears under multiple clients.",
                     Severity.MEDIUM,
+                    match=name,
+                    field="duplicate_server_name",
                     evidence={"server_name": name, "servers": keys},
+                    id_suffix=name,
                 )
             )
 
@@ -128,6 +141,8 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                     "Toxic flow W019: broad multi-server tool surface",
                     f"{total_tools} tools across {len(server_tools)} servers increases agent confusion risk.",
                     Severity.MEDIUM,
+                    match=f"{total_tools} tools / {len(server_tools)} servers",
+                    field="broad_tool_surface",
                     evidence={"server_count": len(server_tools), "tool_count": total_tools},
                 )
             )
@@ -141,6 +156,8 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
                 "Toxic flow W020: minimum server removal set",
                 "Disable or isolate these servers to break all detected toxic flows.",
                 Severity.MEDIUM,
+                match=", ".join(hitting),
+                field="minimum_hitting_set",
                 evidence={"remove_servers": hitting, "flow_count": len(toxic_flows)},
             )
         )
@@ -148,15 +165,35 @@ def analyze_inventory(inventory: list[InventoryEntry]) -> list[Finding]:
     return findings
 
 
-def _finding(code: str, title: str, description: str, severity: Severity, *, evidence: dict) -> Finding:
+def _finding_id_slug(value: str) -> str:
+    return value.replace("/", "-").replace(" ", "-")
+
+
+def _finding(
+    code: str,
+    title: str,
+    description: str,
+    severity: Severity,
+    *,
+    match: str,
+    field: str,
+    evidence: dict,
+    id_suffix: str | None = None,
+) -> Finding:
     payload = {"issue_code": code, **evidence}
-    return Finding(
-        id=f"toxic-flow-{code.lower()}",
+    suffix = id_suffix or match
+    finding_id = f"toxic-flow-{code.lower()}-{_finding_id_slug(suffix)}"
+    return build_analyzer_finding(
+        finding_id=finding_id,
         analyzer="toxic_flows",
         title=title,
         description=description,
         severity=severity,
         recommendation="Review cross-server tool exposure and apply server allowlists.",
+        rule_id=code,
+        match=match,
+        field=field,
         technique_id="MCTS-T-1008",
-        evidence=payload,
+        confidence=0.75,
+        extra_evidence=payload,
     )

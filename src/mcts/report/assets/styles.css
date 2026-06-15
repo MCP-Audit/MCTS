@@ -2507,6 +2507,121 @@ body.modal-open {
   color: #86efac;
 }
 
+.evidence-maturity-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--muted, #94a3b8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.evidence-maturity-graph_path {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.evidence-maturity-capability_overlap {
+  background: rgba(168, 85, 247, 0.12);
+  color: #d8b4fe;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.rule-stability-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  background: rgba(100, 116, 139, 0.15);
+  color: #cbd5e1;
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.rule-stability-heuristic {
+  background: rgba(234, 179, 8, 0.12);
+  color: #fde68a;
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+.rule-stability-experimental {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.rule-stability-mature,
+.rule-stability-verified {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.finding-evidence-section {
+  margin-bottom: 14px;
+}
+
+.finding-evidence-section strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+
+.finding-facts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.finding-facts-table th,
+.finding-facts-table td {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.finding-fact-snippet pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--muted, #94a3b8);
+}
+
+.finding-confidence-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text, #e2e8f0);
+  font-size: 13px;
+}
+
+.finding-mcp-context {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted, #94a3b8);
+}
+
+.finding-evidence-raw summary {
+  cursor: pointer;
+  color: var(--muted, #94a3b8);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
 /* OWASP */
 .owasp-grid {
   display: grid;

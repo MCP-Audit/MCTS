@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding
 from mcts.mcp.models import MCPServerInfo, MCPTool
 from mcts.reporting.models import Finding, Severity
 from mcts.scoring.evidence_tags import tag_permission_finding
@@ -36,29 +37,37 @@ class PermissionAnalyzer(BaseAnalyzer):
 
         if DESTRUCTIVE_PATTERNS.search(haystack):
             findings.append(
-                Finding(
-                    id=f"perm-destructive-{tool.name}",
+                build_analyzer_finding(
+                    finding_id=f"perm-destructive-{tool.name}",
                     analyzer=self.name,
                     title=f"Destructive tool: {tool.name}",
                     description="Tool appears to perform destructive operations without safeguards.",
                     severity=Severity.CRITICAL,
-                    tool=tool.name,
                     recommendation="Require explicit confirmation token or human-in-the-loop approval.",
-                    evidence={"description": tool.description},
+                    rule_id="RULE_PERM_DESTRUCTIVE",
+                    match=tool.name,
+                    field="tool_metadata",
+                    tool=tool.name,
+                    confidence=0.75,
+                    extra_evidence={"description": tool.description},
                 )
             )
 
         if HIGH_RISK_PATTERNS.search(haystack):
             findings.append(
-                Finding(
-                    id=f"perm-high-risk-{tool.name}",
+                build_analyzer_finding(
+                    finding_id=f"perm-high-risk-{tool.name}",
                     analyzer=self.name,
                     title=f"High-risk tool: {tool.name}",
                     description="Tool exposes privileged or execution-capable behavior.",
                     severity=Severity.HIGH,
-                    tool=tool.name,
                     recommendation="Apply least privilege and scope tool inputs strictly.",
-                    evidence={"description": tool.description},
+                    rule_id="RULE_PERM_HIGH_RISK",
+                    match=tool.name,
+                    field="tool_metadata",
+                    tool=tool.name,
+                    confidence=0.7,
+                    extra_evidence={"description": tool.description},
                 )
             )
 

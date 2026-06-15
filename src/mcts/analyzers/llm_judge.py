@@ -6,6 +6,7 @@ import json
 import os
 
 from mcts.analyzers.base import BaseAnalyzer
+from mcts.analyzers.finding_facts import build_analyzer_finding, build_skip_finding
 from mcts.analyzers.surface_context import scan_surfaces
 from mcts.mcp.models import MCPServerInfo
 from mcts.reporting.models import Finding, Severity
@@ -29,11 +30,27 @@ class LlmJudgeAnalyzer(BaseAnalyzer):
     def analyze(self, server: MCPServerInfo) -> list[Finding]:
         api_key = os.environ.get("MCTS_LLM_API_KEY")
         if not api_key:
-            return []
+            return [
+                build_skip_finding(
+                    finding_id="llm-judge-skipped",
+                    analyzer=self.name,
+                    title="LLM judge skipped",
+                    description="MCTS_LLM_API_KEY is not set",
+                    recommendation="Export MCTS_LLM_API_KEY or disable --enable-llm.",
+                )
+            ]
         try:
             import litellm  # type: ignore[import-untyped]
         except ImportError:
-            return []
+            return [
+                build_skip_finding(
+                    finding_id="llm-judge-skipped",
+                    analyzer=self.name,
+                    title="LLM judge skipped",
+                    description="litellm is not installed",
+                    recommendation="Install the llm extra (`uv sync --extra llm`).",
+                )
+            ]
 
         findings: list[Finding] = []
         for surface in scan_surfaces(server):
@@ -55,17 +72,20 @@ class LlmJudgeAnalyzer(BaseAnalyzer):
                 continue
             sev = _map_severity(str(payload.get("severity") or "medium"))
             findings.append(
-                Finding(
-                    id=f"llm-judge-{surface.label}",
+                build_analyzer_finding(
+                    finding_id=f"llm-judge-{surface.label}",
                     analyzer=self.name,
                     title=f"LLM flagged {surface.label}",
                     description=str(payload.get("summary") or "LLM detected potential threat"),
                     severity=sev,
-                    tool=surface.name if surface.kind.value == "tool" else None,
                     recommendation="Review MCP artifact with human analyst.",
+                    rule_id="RULE_LLM_JUDGE",
+                    match=str(payload.get("threat") or surface.label),
+                    field="mcp_surface",
+                    tool=surface.name if surface.kind.value == "tool" else None,
                     technique_id="MCTS-T-1001",
                     confidence=0.6,
-                    evidence={"surface": surface.kind.value, "model": self.model},
+                    extra_evidence={"surface": surface.kind.value, "model": self.model},
                 )
             )
         return findings
