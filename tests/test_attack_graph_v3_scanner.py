@@ -25,10 +25,14 @@ PHASE_3B_TEMPLATE_FIXTURES = {
     "R-15-gzip-resource": "SSRF_RESOURCE",
     "R-02-dual-fetch": "PROMPT_BYPASS",
     "R-04-git-scoping": "GIT_UNSCOPED",
+    "R-05-git-log": "GIT_UNSCOPED",
+    "R-20-git-readme": "GIT_UNSCOPED",
     "R-09-toctou-test": "TOCTOU_READ",
     "R-10-symlink-listing": "TOCTOU_READ",
     "R-07-get-env": "ENV_SAMPLING",
     "R-23-elicitation-phish": "ELICIT_PHISH",
+    "R-24-read-exec": "READ_EXEC",
+    "R-25-cred-theft": "CRED_THEFT",
 }
 
 

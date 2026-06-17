@@ -72,3 +72,19 @@ def test_elicit_phish_r23_fixture() -> None:
     report = Scanner(ScanConfig(target=str(target), surface_depth="full")).run()
     matched = set(report.attack_graph.get("templates_matched") or [])
     assert "ELICIT_PHISH" in matched
+
+
+def test_read_exec_r24_fixture() -> None:
+    spec = json.loads((REGRESSION / "R-24-read-exec" / "expected.json").read_text())
+    target = MONOREPO_MINI / spec["servers_path"]
+    report = Scanner(ScanConfig(target=str(target), surface_depth="full")).run()
+    matched = set(report.attack_graph.get("templates_matched") or [])
+    assert "READ_EXEC" in matched
+
+
+def test_cred_theft_r25_fixture() -> None:
+    spec = json.loads((REGRESSION / "R-25-cred-theft" / "expected.json").read_text())
+    target = MONOREPO_MINI / spec["servers_path"]
+    report = Scanner(ScanConfig(target=str(target), surface_depth="full")).run()
+    matched = set(report.attack_graph.get("templates_matched") or [])
+    assert "CRED_THEFT" in matched

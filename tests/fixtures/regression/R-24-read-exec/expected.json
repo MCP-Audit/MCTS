@@ -1,0 +1,5 @@
+{
+  "servers_path": "src/chain-stubs/read_exec.py",
+  "package_depth": "full",
+  "note": "R-24 — read_file + run_shell enables READ_EXEC chain template"
+}

@@ -1,0 +1,5 @@
+{
+  "servers_path": "src/chain-stubs/cred_theft.py",
+  "package_depth": "full",
+  "note": "R-25 — read + get_env + send_webhook enables CRED_THEFT chain template"
+}

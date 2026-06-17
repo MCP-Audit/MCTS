@@ -31,7 +31,7 @@ This is the **detailed implementation guide** for evolving MCTS from an alpha sc
 | **Orchestration** | `core/scanner.py`, `core/config.py` | 20+ analyzers → compliance → scoring → `ScanReport` |
 | **Discovery** | `discovery/*`, `mcp/client.py` | Multi-file Python + TypeScript static discovery; live stdio + HTTP/SSE merge |
 | **Analyzers** | `analyzers/*.py` | Metadata, SAST, 20+ runtime sub-detectors, Sigma, OAuth, supply chain |
-| **Attack chains** | `attack_chains.py` | Capability-graph BFS on per-tool profiles |
+| **Attack graph v3** | `scoring/attack_graph_builder.py`, `scoring/templates/` | YAML template matcher + `GraphBuilder`; 12 chain templates; capability overlap fallbacks |
 | **Scoring** | `scoring/engine.py`, `engine_v2.py`, `graph.py`, `chains.py` | Legacy exponential + v2 multi-factor (`absolute_risk`), corpus calibration, dual default `both` |
 | **Compliance** | `compliance/checks.py` | OWASP LLM meta-findings |
 | **CLI** | `cli/main.py` | `scan`, `report`, `inventory`, `fuzz`, `readiness`, `serve`, `vet`, `pentest`, `doctor`, `snapshot`, `scan-mcp`; `mcts-mcp` server mode |
@@ -196,7 +196,7 @@ Fix structural limits before adding features.
 
 **JailbreakAnalyzer:** Weighted manipulation surface (tool count, executes_commands, missing schema, chain edges).
 
-**AttackChainAnalyzer:** Build directed graph from `CapabilityProfile`; BFS for critical paths; store in `ScanReport.attack_graph`.
+**Attack graph v3 (`GraphBuilder`):** Merge producer edges, apply policy edges, match YAML chain templates (read→exfil, SSRF resource staging, URL elicitation, etc.); store paths on `ScanReport.attack_graph`. Legacy capability-overlap findings remain as trust-capped fallbacks via `capability_overlap.py`.
 
 ---
 
