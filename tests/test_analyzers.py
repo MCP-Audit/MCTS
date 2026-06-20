@@ -6,7 +6,7 @@ from mcts.analyzers.command_execution import CommandExecutionAnalyzer
 from mcts.analyzers.data_leakage import DataLeakageAnalyzer
 from mcts.core.config import ScanConfig
 from mcts.discovery.static import StaticDiscovery
-from mcts.mcp.models import MCPServerInfo
+from mcts.mcp.models import MCPServerInfo, MCPTool
 from mcts.reporting.models import Severity
 
 
@@ -19,6 +19,25 @@ def test_command_execution_detects_subprocess(example_server_path: Path) -> None
     assert any(f.severity == Severity.CRITICAL for f in findings)
     assert any(f.technique_id == "MCTS-T-1003" for f in findings)
     assert all(isinstance((f.evidence or {}).get("facts"), list) and f.evidence["facts"] for f in findings)
+
+
+def test_command_execution_ignores_substrings_without_calls() -> None:
+    server = MCPServerInfo(
+        tools=[
+            MCPTool(
+                name="describe",
+                description="Describe execution status.",
+                handler_snippet=(
+                    "def describe(name: str) -> str:\n"
+                    "    return f'No subprocess or exec call is used while fetching {name}'\n"
+                ),
+            )
+        ]
+    )
+
+    findings = CommandExecutionAnalyzer().analyze(server)
+
+    assert findings == []
 
 
 def test_data_leakage_scans_source_files(example_server_path: Path) -> None:

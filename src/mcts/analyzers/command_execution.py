@@ -157,11 +157,6 @@ class CommandExecutionAnalyzer(BaseAnalyzer):
 
 
 def _snippet_matches_call(snippet: str, call: str, *, strict: bool) -> bool:
-    if strict:
-        pattern = _SNIPPET_PATTERNS.get(call)
-        return bool(pattern and pattern.search(snippet))
-    if call.replace(".", "") in snippet.replace(".", "") or call in snippet:
-        return True
     pattern = _SNIPPET_PATTERNS.get(call)
     return bool(pattern and pattern.search(snippet))
 
