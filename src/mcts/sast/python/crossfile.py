@@ -47,17 +47,24 @@ def _local_imports(source: str) -> list[str]:
 
 
 def _resolve_module(base_dir: Path, module_name: str, source_files: dict[str, str]) -> str | None:
-    candidates = [
-        base_dir / f"{module_name}.py",
-        base_dir / module_name / "__init__.py",
-    ]
+    candidates = list(_module_candidates(base_dir, module_name))
     for candidate in candidates:
         key = str(candidate)
         if key in source_files:
             return source_files[key]
         if candidate.exists():
             return candidate.read_text(encoding="utf-8")
-    for path, content in source_files.items():
-        if path.endswith(f"/{module_name}.py") or path.endswith(f"/{module_name}/__init__.py"):
-            return content
     return None
+
+
+def _module_candidates(base_dir: Path, module_name: str) -> list[Path]:
+    roots = [base_dir, *base_dir.parents]
+    candidates: list[Path] = []
+    for root in roots:
+        candidates.extend(
+            [
+                root / f"{module_name}.py",
+                root / module_name / "__init__.py",
+            ]
+        )
+    return list(dict.fromkeys(candidates))

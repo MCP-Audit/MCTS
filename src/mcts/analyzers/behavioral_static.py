@@ -69,6 +69,37 @@ _SINK_MARKERS = {
     "shutil": Severity.HIGH,
 }
 
+_PYTHON_CALL_SINKS = {
+    "subprocess.run": ("subprocess", Severity.HIGH),
+    "subprocess.call": ("subprocess", Severity.HIGH),
+    "subprocess.Popen": ("subprocess", Severity.HIGH),
+    "subprocess.check_output": ("subprocess", Severity.HIGH),
+    "os.system": ("os.system", Severity.HIGH),
+    "os.popen": ("os.popen", Severity.HIGH),
+    "eval": ("eval", Severity.CRITICAL),
+    "exec": ("exec", Severity.CRITICAL),
+    "open": ("open", Severity.MEDIUM),
+    "requests.get": ("requests.", Severity.MEDIUM),
+    "requests.post": ("requests.", Severity.MEDIUM),
+    "requests.put": ("requests.", Severity.MEDIUM),
+    "requests.delete": ("requests.", Severity.MEDIUM),
+    "requests.request": ("requests.", Severity.MEDIUM),
+    "urllib.request.urlopen": ("urllib", Severity.MEDIUM),
+    "httpx.get": ("httpx", Severity.HIGH),
+    "httpx.post": ("httpx", Severity.HIGH),
+    "httpx.AsyncClient": ("http_client", Severity.HIGH),
+    "shutil.rmtree": ("shutil.rmtree", Severity.HIGH),
+    "os.remove": ("os.remove", Severity.HIGH),
+    "os.unlink": ("os.remove", Severity.HIGH),
+    "os.rmdir": ("os.remove", Severity.HIGH),
+    "shutil.copy": ("shutil", Severity.HIGH),
+    "shutil.move": ("shutil", Severity.HIGH),
+    "pickle.load": ("pickle", Severity.HIGH),
+    "pickle.loads": ("pickle", Severity.HIGH),
+    "socket.socket": ("socket", Severity.MEDIUM),
+    "Template": ("Template", Severity.HIGH),
+}
+
 
 class BehavioralStaticAnalyzer(BaseAnalyzer):
     """Detects description/implementation mismatches and taint flows in tool handlers."""
@@ -363,6 +394,8 @@ def _read_handler(path: str, line: int | None) -> str:
 
 def _detect_sinks(snippet: str, source_file: str | None) -> dict[str, Severity]:
     sinks: dict[str, Severity] = {}
+    if _looks_like_python(snippet, source_file):
+        return _detect_python_sinks(snippet)
     if _is_typescript(source_file) or _looks_like_typescript(snippet):
         for label in detect_typescript_sinks(snippet):
             sinks[label] = _SINK_MARKERS.get(label, Severity.MEDIUM)
@@ -375,8 +408,11 @@ def _detect_sinks(snippet: str, source_file: str | None) -> dict[str, Severity]:
     for marker, severity in _SINK_MARKERS.items():
         if marker in snippet:
             sinks[marker] = severity
-    if not _is_python(source_file):
-        return sinks
+    return sinks
+
+
+def _detect_python_sinks(snippet: str) -> dict[str, Severity]:
+    sinks: dict[str, Severity] = {}
     try:
         tree = ast.parse(snippet)
     except SyntaxError:
@@ -384,8 +420,8 @@ def _detect_sinks(snippet: str, source_file: str | None) -> dict[str, Severity]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in ("subprocess.run", "subprocess.Popen", "os.system", "eval", "exec"):
-                sinks[name] = Severity.HIGH
+            if name in _PYTHON_CALL_SINKS:
+                sinks[_PYTHON_CALL_SINKS[name][0]] = _PYTHON_CALL_SINKS[name][1]
     return sinks
 
 

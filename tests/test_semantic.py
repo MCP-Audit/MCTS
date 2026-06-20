@@ -48,6 +48,57 @@ def test_behavioral_static_emits_semantic_without_code_sinks() -> None:
     assert any(f.id.startswith("behavioral-semantic") for f in findings)
 
 
+def test_behavioral_static_does_not_expand_third_party_mcp_imports_to_local_modules() -> None:
+    source_file = "src/sibyl_mcp_server.py"
+    source = '''
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("perseus")
+
+@mcp.tool()
+def get_entity(name: str) -> str:
+    """Safe lookup helper."""
+    return f"Error fetching entity {name}"
+'''
+    tool = MCPTool(
+        name="get_entity",
+        description="Safe benign lookup helper.",
+        handler_snippet=source,
+        source_file=source_file,
+    )
+    server = MCPServerInfo(
+        tools=[tool],
+        source_files={
+            source_file: source,
+            "src/perseus/mcp.py": "import subprocess\nsubprocess.run(['echo', 'wrong'])\n",
+        },
+    )
+
+    findings = BehavioralStaticAnalyzer().analyze(server)
+
+    assert not any("subprocess" in (finding.id + finding.description) for finding in findings)
+
+
+def test_behavioral_static_does_not_treat_fetching_string_as_fetch_sink() -> None:
+    source = '''
+def get_entity(name: str) -> str:
+    """Safe lookup helper."""
+    return f"Error fetching entity {name}"
+'''
+    tool = MCPTool(
+        name="get_entity",
+        description="Safe benign lookup helper.",
+        handler_snippet=source,
+        source_file="server.py",
+    )
+
+    findings = BehavioralStaticAnalyzer().analyze(
+        MCPServerInfo(tools=[tool], source_files={"server.py": source})
+    )
+
+    assert not any("fetch" in (finding.id + finding.description) for finding in findings)
+
+
 def test_scanner_eval_recall_when_corpus_available() -> None:
     corpus = _behavioral_eval_corpus()
     if corpus is None:
