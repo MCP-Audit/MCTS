@@ -212,7 +212,7 @@ Exit code **1** when a gate fails; **2** for usage/consent errors.
 | `--max-critical N` | `summary.critical > N` |
 | `--fail-on-category KEY:LIMIT` | Legacy category score ≥ LIMIT |
 
-Category gates are **inclusive** at the limit: `--fail-on-category permissions:10` fails when permissions category score is **10 or higher**.
+Category gates are **inclusive** at the limit: `--fail-on-category permissions:10` fails when permissions category score is **10 or higher**. To require a zero-risk permissions category, use `permissions:1`; a limit of `permissions:0` fails even when the score is 0 because `0 >= 0`.
 
 ### v2 gates (shipped)
 
