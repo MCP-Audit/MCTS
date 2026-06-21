@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified inclusive `--fail-on-category` thresholds in CLI help and docs, including the `permissions:0` always-fail pitfall (#217).
+
 ## [0.1.4] - 2026-06-12
 
 ### Security

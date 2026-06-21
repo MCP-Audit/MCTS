@@ -87,7 +87,7 @@ When `-o` is set, format determines serialization. SARIF uses `reporting/sarif.p
 | `--fail-on-critical` | false | Exit **1** if any critical finding |
 | `--min-score` | — | Exit **1** if legacy `score.overall` < N (0–100) |
 | `--max-critical` | — | Exit **1** if critical count > N |
-| `--fail-on-category` | — | Repeatable. Format: `category:limit`. Exit **1** when **legacy** category score ≥ limit |
+| `--fail-on-category` | — | Repeatable. Format: `category:limit`. Exit **1** when **legacy** category score ≥ limit. Inclusive: `permissions:0` fails even at score 0; use `permissions:1` to allow a zero-point pass |
 | `--scoring` | `both` | `legacy`, `v2`, or `both` — enable multi-factor scoring |
 | `--min-security-score` | — | Exit **1** if v2 benchmark security score < N (requires `--scoring v2` or `both`) |
 | `--max-absolute-risk` | — | Exit **1** if v2 `absolute_risk` > N (requires `--scoring v2` or `both`) |
@@ -98,6 +98,12 @@ When `-o` is set, format determines serialization. SARIF uses `reporting/sarif.p
 | `--no-attack-chains` | false | Disable v2 **chain multiplier** only (`chain_factor_mode: disabled`). Under `--scoring v2\|both` the attack chains analyzer still runs for graph + meta-findings. Use `--scoring legacy` to omit chain meta-findings entirely. |
 
 Valid **legacy** category keys: `permissions`, `injection`, `execution`, `data_leakage`, `attack_chains`, `shadowing`, `jailbreak`. Category gates apply to v1 tiles only — not `category_scores_v2`. See [Scoring developer guide](../reporting/scoring-guide.md).
+
+`--fail-on-category` budgets legacy category **risk points**, not finding counts. The threshold is inclusive:
+
+- `permissions:10` fails when the permissions score is 10 or higher.
+- `permissions:1` allows a zero-point permissions category to pass and fails once it reaches 1 or more.
+- `permissions:0` is an always-fail gate because score 0 still meets `>= 0`.
 
 ### Terminal UI flags
 
@@ -221,6 +227,10 @@ mcts scan ./server.py -o report.sarif --format sarif \
 mcts scan ./repo/ \
   --fail-on-category permissions:10 \
   --fail-on-category injection:15
+
+# Strict zero-risk category gate
+mcts scan ./repo/ \
+  --fail-on-category permissions:1
 
 # Fuzz telemetry replay
 mcts scan ./server.py --runtime-events fuzz.json

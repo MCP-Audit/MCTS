@@ -318,7 +318,8 @@ def scan(
             help=(
                 "Exit 1 when legacy category risk score meets or exceeds threshold (inclusive). "
                 "Legacy v1 tiles only — not category_scores_v2. "
-                "e.g. permissions:0 fails when score is 0 or more. Repeatable."
+                "Example: permissions:10 fails at 10+ risk points; permissions:0 always fails, "
+                "even when the category score is 0. Use permissions:1 to allow a zero-point pass. Repeatable."
             ),
         ),
     ] = None,
