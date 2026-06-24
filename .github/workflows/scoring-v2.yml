@@ -9,7 +9,7 @@ jobs:
   scoring:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --group dev
       - run: uv run pytest tests/scoring/ tests/test_attack_graph.py tests/test_cli_gates_v2.py tests/test_cli_report.py tests/test_analysis_output.py tests/test_html_report.py tests/test_governance.py tests/test_mcp_server.py tests/test_api_gate_violations.py tests/test_inventory_scan_all.py -v
