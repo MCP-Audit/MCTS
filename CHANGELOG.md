@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Ignore loopback development URLs in data-leakage findings while retaining detection for non-loopback internal hosts (#194).
 - **ELICIT_PHISH matching** — client-capability `TRIGGERS` edges use `trust_boundary` layer; path enumeration terminates at dead-end capability nodes
 - **Validator hardening** — removed standalone `evidence.hop_count` and `evidence.path` proven-path bypasses; chain level matches associated graph path
 - **Auxiliary trust explicit parity** — vet/fuzz/inventory/readiness/pentest set `findings_trust_mode_explicit` when `--findings-trust-mode` is passed; API readiness adds `ignore_policy` + explicit flag

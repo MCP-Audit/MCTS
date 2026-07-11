@@ -29,7 +29,7 @@ def test_data_leakage_scans_source_files(example_server_path: Path) -> None:
     assert source_findings or any(f.analyzer == "data_leakage" for f in report.findings)
 
 
-def test_data_leakage_ignores_loopback_urls_in_log_messages() -> None:
+def test_data_leakage_ignores_loopback_urls() -> None:
     server = MCPServerInfo(
         name="perseus",
         source_files={
@@ -46,9 +46,31 @@ def test_data_leakage_ignores_loopback_urls_in_log_messages() -> None:
 
     findings = DataLeakageAnalyzer().analyze(server)
 
-    assert len(findings) == 1
-    assert findings[0].location
-    assert findings[0].location.line == 4
+    assert not findings
+
+
+def test_data_leakage_flags_non_loopback_internal_urls() -> None:
+    server = MCPServerInfo(
+        name="sso-config",
+        source_files={
+            "config.py": "\n".join(
+                [
+                    "SSO_ENDPOINTS = {",
+                    "    'local': 'http://localhost:8080/sso',",
+                    "    'loopback': 'http://127.0.0.1:8080/sso',",
+                    "    'stage': 'https://stage.example.com/sso',",
+                    "}",
+                    "PROD_SSO = 'https://internal.example.com/sso'",
+                    "SERVICE_SSO = 'http://internal-service:8080/sso'",
+                ]
+            )
+        },
+    )
+
+    findings = DataLeakageAnalyzer().analyze(server)
+
+    assert len(findings) == 2
+    assert [finding.location.line if finding.location else None for finding in findings] == [6, 7]
 
 
 def test_docker_dedupe_dockerfile_and_containerfile(tmp_path: Path) -> None:

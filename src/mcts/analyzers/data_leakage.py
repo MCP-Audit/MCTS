@@ -27,7 +27,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], Severity]] = [
     ("Database URL", re.compile(r"(?i)(postgres|mysql|mongodb)://\S+"), Severity.HIGH),
     (
         "Internal URL",
-        re.compile(r"https?://(?:localhost|127\.0\.0\.1|internal|\.local)\S*"),
+        re.compile(r"https?://(?:internal|\.local)\S*", re.IGNORECASE),
         Severity.MEDIUM,
     ),
 ]
