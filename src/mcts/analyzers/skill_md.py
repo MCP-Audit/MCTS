@@ -18,7 +18,17 @@ _SHELL = re.compile(r"(?i)\b(rm\s+-rf|bash\s+-c|eval\s*\(|/bin/sh|powershell\s+-
 _CREDENTIAL = re.compile(
     r"(?i)\b(api[_ -]?key|secret[_ -]?key|access[_ -]?token|private[_ -]?key|password)\b"
 )
-_REMOTE_FETCH = re.compile(r"(?i)https?://[^\s\"']+")
+_REMOTE_FETCH = re.compile(r"https?://[^\s\"']+", re.IGNORECASE)
+_MARKDOWN_LINK_TARGET = re.compile(r"\]\(\s*(https?://[^\s)]+)", re.IGNORECASE)
+_MARKDOWN_AUTOLINK = re.compile(r"<(https?://[^>\s]+)>", re.IGNORECASE)
+_MARKDOWN_REFERENCE_TARGET = re.compile(
+    r"^\s*\[[^\]]+\]:\s*(https?://\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_MARKDOWN_HTML_LINK_TARGET = re.compile(
+    r"""<a\b[^>]*\bhref\s*=\s*["'](https?://[^"']+)["']""",
+    re.IGNORECASE,
+)
 _UNPINNED_INSTALL = re.compile(r"(?i)\b(pip install|npm install|uv add)\b[^;\n]*(\^|~|latest|\*)")
 _SYSTEM_PATH = re.compile(r"(?i)\b(/etc/|~/.ssh|/var/|C:\\Windows\\)\b")
 _REMOTE_DOWNLOAD = re.compile(r"(?i)\b(curl|wget|fetch)\b.{0,80}\b(http|https)")
@@ -59,7 +69,7 @@ def analyze_skill(entry: SkillEntry) -> list[Finding]:
         if pattern.search(text):
             findings.append(_finding(entry, code, label, title))
 
-    remote_urls = _REMOTE_FETCH.findall(text)
+    remote_urls = _remote_urls_outside_markdown_citations(text)
     if len(remote_urls) >= 3:
         findings.append(
             _finding(
@@ -72,6 +82,33 @@ def analyze_skill(entry: SkillEntry) -> list[Finding]:
         )
 
     return findings
+
+
+def _remote_urls_outside_markdown_citations(text: str) -> list[str]:
+    citation_spans = sorted(
+        match.span(1)
+        for pattern in (
+            _MARKDOWN_LINK_TARGET,
+            _MARKDOWN_AUTOLINK,
+            _MARKDOWN_REFERENCE_TARGET,
+            _MARKDOWN_HTML_LINK_TARGET,
+        )
+        for match in pattern.finditer(text)
+    )
+
+    remote_urls: list[str] = []
+    span_index = 0
+    for match in _REMOTE_FETCH.finditer(text):
+        while span_index < len(citation_spans) and citation_spans[span_index][1] <= match.start():
+            span_index += 1
+        if (
+            span_index < len(citation_spans)
+            and citation_spans[span_index][0] <= match.start() < citation_spans[span_index][1]
+        ):
+            continue
+        remote_urls.append(match.group(0))
+
+    return remote_urls
 
 
 def analyze_skills(entries: list[SkillEntry]) -> list[Finding]:
