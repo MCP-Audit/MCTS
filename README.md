@@ -230,6 +230,26 @@ uv run mcts scan ./server.py --theme cyber    # default
 uv run mcts scan ./server.py --theme minimal --no-progress
 ```
 
+### Config-based scan: static versus live
+
+Selecting a server from an MCP client config is static by default. MCTS analyzes
+the repository files but does not execute the selected entry's command or launch
+arguments, so multiple config entries that point at the same source may receive
+the same score:
+
+```bash
+mcts scan . --config ~/.cursor/mcp.json --server ifd-prod
+```
+
+Add live mode when the launch arguments or runtime-exposed schemas differ by
+server. Live mode starts the selected process and therefore requires explicit
+consent:
+
+```bash
+mcts scan . --config ~/.cursor/mcp.json --server ifd-prod \
+  --live --i-understand-live-risk
+```
+
 ## Architecture
 
 ```

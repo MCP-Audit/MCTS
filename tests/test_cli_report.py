@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from typer.core import TyperGroup, TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from mcts.cli.main import app
@@ -72,6 +75,68 @@ def test_scan_scoring_both_prints_v2_summary(example_server_path: Path, tmp_path
     )
     assert result.exit_code in (0, 1), result.stdout
     assert "absolute_risk" in result.stdout.lower() or "Absolute Risk" in result.stdout
+
+
+def test_scan_help_explains_config_static_vs_live() -> None:
+    root_command = get_command(app)
+    assert isinstance(root_command, TyperGroup)
+    scan_command = root_command.commands["scan"]
+    help_by_name = {param.name: param.help for param in scan_command.params if isinstance(param, TyperOption)}
+
+    assert help_by_name["config"] == (
+        "MCP client config JSON; static mode reads metadata only and does not execute launch args"
+    )
+    assert help_by_name["server"] == (
+        "Server name inside --config; add --live for per-server runtime analysis"
+    )
+    assert help_by_name["live"] == (
+        "Execute and probe a live stdio MCP server; with --config, "
+        "uses its command and args (requires consent)"
+    )
+
+
+def test_config_static_scan_warns_in_console_and_json(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "prod": {
+                        "command": "definitely-not-a-real-command",
+                        "args": ["--sso-env", "prod"],
+                    }
+                }
+            }
+        )
+    )
+    (tmp_path / "app.py").write_text("x = 1\n")
+    output_path = tmp_path / "scan-report.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(tmp_path),
+            "--config",
+            str(config),
+            "--server",
+            "prod",
+            "--no-progress",
+            "--output",
+            str(output_path),
+        ],
+    )
+    console_output = " ".join(result.stdout.split())
+
+    assert result.exit_code == 0, result.stdout
+    assert "did not execute the server command or args" in console_output
+    assert "All config servers may share the same score until --live is used" in console_output
+
+    payload = json.loads(output_path.read_text())
+    scan_notes = " ".join(payload["scan_notes"])
+    assert "did not execute the server command or args" in scan_notes
+    assert "server=prod" in scan_notes
 
 
 def test_report_valid_json(tmp_path: Path) -> None:

@@ -111,13 +111,13 @@ Valid **legacy** category keys: `permissions`, `injection`, `execution`, `data_l
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--languages` | `python,typescript` | Comma-separated static discovery backends |
-| `--live` | false | Connect to live stdio MCP server |
+| `--live` | false | Execute and probe a live stdio MCP server; with `--config`, use its command and args |
 | `--url` | — | Remote MCP URL (streamable HTTP or SSE); implies live |
 | `--transport` | `streamable-http` | Remote transport: `streamable-http` or `sse` |
 | `--command` | — | Custom launch binary for live mode |
 | `--args` | — | Comma-separated args for `--command` |
-| `--config` | — | MCP client config JSON path (JSON5/comments supported) |
-| `--server` | — | Server name inside `mcpServers` (requires `--config`) |
+| `--config` | — | MCP client config JSON path (JSON5/comments supported); static mode does not execute launch args |
+| `--server` | — | Server name inside `mcpServers` (requires `--config`); add `--live` for runtime analysis |
 | `--expand-vars` | `auto` | Expand `$VAR` / `%VAR%` in config commands: `auto`, `linux`, `mac`, `windows`, `off` |
 | `--snapshot` | — | Static JSON snapshot (`tools/list` export); no live connection |
 | `--surfaces` | all four | Comma-separated: `tool`, `prompt`, `resource`, `instruction` |
@@ -129,6 +129,13 @@ Valid **legacy** category keys: `permissions`, `injection`, `execution`, `data_l
 | `--resource-mime` | — | Comma-separated MIME allowlist for resource scanning (e.g. `text/plain`) |
 | `--i-understand-live-risk` | false | Consent for live/remote probe (or `MCTS_LIVE_OK=1`) |
 | `--stderr-file` | — | Capture live server stderr to file |
+
+With `--config` and `--server` but without `--live`, MCTS uses the config as
+metadata and scans the target files. It does not start the configured command or
+interpret argument-dependent behavior. Config entries that point at the same
+source can therefore produce identical static scores. Add `--live` and
+`--i-understand-live-risk` to execute the selected entry and inspect its runtime
+MCP surfaces.
 
 ### Remote auth flags
 
