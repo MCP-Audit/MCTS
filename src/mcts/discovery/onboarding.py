@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from mcts.discovery.config import list_server_names
@@ -52,7 +53,10 @@ def find_entrypoint_candidates(root: Path, *, limit: int = 5) -> list[Path]:
     base = root.expanduser().resolve()
     if not base.is_dir():
         return []
-    scored: list[tuple[int, Path]] = []
+    scored: dict[Path, int] = {}
+    for path in _config_entrypoints(base):
+        if path.is_file() and not _should_skip(path, base):
+            scored[path] = 100
     for path in base.rglob("*.py"):
         if _should_skip(path, base):
             continue
@@ -68,10 +72,34 @@ def find_entrypoint_candidates(root: Path, *, limit: int = 5) -> list[Path]:
             score += 2
         if "/mcp/" in f"/{path.relative_to(base).as_posix()}/":
             score += 1
-        scored.append((score, path))
+        scored[path] = max(scored.get(path, 0), score)
 
-    scored.sort(key=lambda item: (-item[0], str(item[1])))
-    return [path for _, path in scored[:limit]]
+    return sorted(scored, key=lambda path: (-scored[path], str(path)))[:limit]
+
+
+def _config_entrypoints(root: Path) -> list[Path]:
+    """Resolve local Python entrypoint paths declared in MCP client configs."""
+    paths: list[Path] = []
+    for config_path in find_mcp_configs(root):
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        servers = config.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            continue
+        for server in servers.values():
+            if not isinstance(server, dict):
+                continue
+            args = server.get("args", [])
+            if not isinstance(args, list):
+                continue
+            for index, arg in enumerate(args):
+                if arg == "-m" and index + 1 < len(args) and isinstance(args[index + 1], str):
+                    paths.append(root / (args[index + 1].replace(".", "/") + ".py"))
+                elif isinstance(arg, str) and arg.endswith(".py"):
+                    paths.append(root / arg)
+    return paths
 
 
 def format_discovery_hints(root: Path) -> str:

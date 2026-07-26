@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Doctor MCP config entrypoints** — `mcts doctor` now resolves local Python module and script entrypoints declared in `.mcp.json`.
 - **Attack graph Phase 3c polish** — FixKind registry with runtime `graph_mutate` engine (apply registry `mutates` and simulate template elimination), inventory multi-server graph layer (`graph_inventory`), counterfactual fix simulation on paths, default-on counterfactuals and UI compression (`--no-attack-graph-counterfactuals`, `--no-attack-graph-compress-ui`), dashboard layer filter + policy/inferred edge styling, `mcts doctor --suggest-fixes --report`
 - **`mcts inventory` privacy controls** — `--paths-only`, `--config-path`, `--redact-paths`; documented in `SECURITY.md` (#87)
 

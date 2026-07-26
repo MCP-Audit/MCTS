@@ -38,6 +38,30 @@ def test_entrypoint_candidates_skips_tests_dir(tmp_path: Path) -> None:
     assert tests not in candidates
 
 
+def test_entrypoint_candidates_include_module_and_script_from_mcp_config(tmp_path: Path) -> None:
+    bridge = tmp_path / "ifd_backend" / "bridge.py"
+    bridge.parent.mkdir()
+    bridge.write_text("def main(): pass\n")
+    script = tmp_path / "tools" / "server.py"
+    script.parent.mkdir()
+    script.write_text("def main(): pass\n")
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "bridge": {"command": "python", "args": ["-m", "ifd_backend.bridge"]},
+                    "script": {"command": "python", "args": ["tools/server.py"]},
+                }
+            }
+        )
+    )
+
+    candidates = find_entrypoint_candidates(tmp_path)
+
+    assert bridge in candidates
+    assert script in candidates
+
+
 def test_format_discovery_hints_includes_config(tmp_path: Path) -> None:
     config = tmp_path / ".mcp.json"
     config.write_text(json.dumps({"mcpServers": {"local": {"command": "python"}}}))
