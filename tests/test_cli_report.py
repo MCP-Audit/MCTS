@@ -76,7 +76,12 @@ def test_scan_scoring_both_prints_v2_summary(example_server_path: Path, tmp_path
 
 
 def test_scan_help_explains_config_static_vs_live() -> None:
-    result = runner.invoke(app, ["scan", "--help"])
+    result = runner.invoke(
+        app,
+        ["scan", "--help"],
+        color=False,
+        terminal_width=240,
+    )
     output = " ".join(result.stdout.replace("│", " ").split())
 
     assert result.exit_code == 0
