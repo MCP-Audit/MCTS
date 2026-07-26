@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Ignore ordinary Markdown citation targets when evaluating SKILL.md remote-fetch volume, while retaining high-severity detection for executable fetch commands.
+
 ## [0.1.4] - 2026-06-12
 
 ### Security
