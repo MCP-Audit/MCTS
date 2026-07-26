@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from typer.core import TyperGroup, TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from mcts.cli.main import app
@@ -76,18 +78,21 @@ def test_scan_scoring_both_prints_v2_summary(example_server_path: Path, tmp_path
 
 
 def test_scan_help_explains_config_static_vs_live() -> None:
-    result = runner.invoke(
-        app,
-        ["scan", "--help"],
-        color=False,
-        terminal_width=240,
-    )
-    output = " ".join(result.stdout.replace("│", " ").split())
+    root_command = get_command(app)
+    assert isinstance(root_command, TyperGroup)
+    scan_command = root_command.commands["scan"]
+    help_by_name = {param.name: param.help for param in scan_command.params if isinstance(param, TyperOption)}
 
-    assert result.exit_code == 0
-    assert "static mode reads metadata only and does not execute launch args" in output
-    assert "add --live for per-server runtime analysis" in output
-    assert "with --config, uses its command and args" in output
+    assert help_by_name["config"] == (
+        "MCP client config JSON; static mode reads metadata only and does not execute launch args"
+    )
+    assert help_by_name["server"] == (
+        "Server name inside --config; add --live for per-server runtime analysis"
+    )
+    assert help_by_name["live"] == (
+        "Execute and probe a live stdio MCP server; with --config, "
+        "uses its command and args (requires consent)"
+    )
 
 
 def test_config_static_scan_warns_in_console_and_json(tmp_path: Path, monkeypatch) -> None:
