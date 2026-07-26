@@ -26,6 +26,8 @@ Complete reference for every MCTS command and flag. Use this when you need to lo
 
 ## `mcts doctor`
 
+When a local `.mcp.json` declares a Python `-m package.module` or script-path launch argument, Doctor includes the resolved local file as an entrypoint candidate.
+
 Read-only preflight checks before your first scan (no live probes).
 
 ```bash
