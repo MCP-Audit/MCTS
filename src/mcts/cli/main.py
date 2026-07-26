@@ -274,7 +274,13 @@ def scan(
     ] = "json",
     live: Annotated[
         bool,
-        typer.Option("--live", help="Connect to a live stdio MCP server (requires consent)"),
+        typer.Option(
+            "--live",
+            help=(
+                "Execute and probe a live stdio MCP server; with --config, uses its "
+                "command and args (requires consent)"
+            ),
+        ),
     ] = False,
     command: Annotated[
         str | None,
@@ -286,11 +292,17 @@ def scan(
     ] = None,
     config: Annotated[
         Path | None,
-        typer.Option("--config", help="MCP client config JSON (Cursor, Claude, VS Code)"),
+        typer.Option(
+            "--config",
+            help=("MCP client config JSON; static mode reads metadata only and does not execute launch args"),
+        ),
     ] = None,
     server: Annotated[
         str | None,
-        typer.Option("--server", help="Server name inside --config mcpServers"),
+        typer.Option(
+            "--server",
+            help="Server name inside --config; add --live for per-server runtime analysis",
+        ),
     ] = None,
     understand_live_risk: Annotated[
         bool,

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Clarify that `scan --config ... --server ...` is static by default, does not execute launch arguments, and needs `--live --i-understand-live-risk` for per-server runtime analysis.
+
 ## [0.1.4] - 2026-06-12
 
 ### Security
