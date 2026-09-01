@@ -9,8 +9,12 @@ from pathlib import Path
 from mcts.analyzers.base import BaseAnalyzer
 from mcts.analyzers.manifest_deps import (
     UNPINNED_PATTERN,
+    import_distribution_name,
+    is_stdlib_module,
     is_unpinned_spec,
     iter_pyproject_dependencies,
+    iter_python_imports,
+    iter_requirement_names,
     load_locked_versions,
     normalize_package_name,
 )
@@ -41,7 +45,53 @@ class SupplyChainAnalyzer(BaseAnalyzer):
         findings.extend(self._scan_package_json(root))
         findings.extend(self._scan_pyproject(root))
         findings.extend(self._scan_requirements(root))
+        findings.extend(self._scan_undeclared_python_imports(root))
         findings.extend(self._scan_dockerfile(root))
+        return findings
+
+    def _scan_undeclared_python_imports(self, root: Path) -> list[Finding]:
+        """Compare runtime Python imports with the nearest dependency manifest."""
+        paths = _find_python_files(root)
+        if not paths:
+            return []
+
+        manifest_roots, declared_by_root = _python_manifest_declarations(root)
+        local_modules = _local_python_modules(root, paths)
+        imports: dict[str, tuple[Path, int, str]] = {}
+        for path in paths:
+            project_root = _nearest_manifest_root(path, manifest_roots) or root
+            declared = declared_by_root.get(project_root, set())
+            for module, line in iter_python_imports(path):
+                if is_stdlib_module(module) or module in local_modules:
+                    continue
+                distribution = import_distribution_name(module)
+                if distribution in declared:
+                    continue
+                imports.setdefault(distribution, (path, line, module))
+
+        findings: list[Finding] = []
+        for distribution, (path, line, module) in sorted(imports.items()):
+            findings.append(
+                _finding(
+                    path,
+                    f"supply-undeclared-import-{distribution}",
+                    f"Undeclared runtime Python import: {distribution}",
+                    (
+                        f"Runtime code imports {distribution!r}, but the nearest Python "
+                        "dependency manifest does not declare it."
+                    ),
+                    Severity.MEDIUM,
+                    "MCTS-T-1014",
+                    line=line,
+                    evidence={
+                        "package": distribution,
+                        "import": module,
+                        "scope": "runtime",
+                        "analysis_mode": "static_import_manifest",
+                        "risk_tags": ["undeclared_import"],
+                    },
+                )
+            )
         return findings
 
     def _scan_package_json(self, root: Path) -> list[Finding]:
@@ -182,6 +232,64 @@ def _find_files(root: Path, name: str) -> list[Path]:
             continue
         results.append(path)
     return results[:20]
+
+
+def _find_python_files(root: Path) -> list[Path]:
+    """Return bounded Python source paths, excluding tests and generated trees."""
+    if root.is_file():
+        return [root] if root.suffix == ".py" and not _is_test_path(root) else []
+    paths = [
+        path
+        for path in root.rglob("*.py")
+        if not any(part in DEFAULT_EXCLUDE_DIRS for part in path.parts) and not _is_test_path(path)
+    ]
+    return sorted(paths)[:1000]
+
+
+def _is_test_path(path: Path) -> bool:
+    return (
+        "tests" in path.parts
+        or "test" in path.parts
+        or path.name.startswith("test_")
+        or path.name.endswith("_test.py")
+    )
+
+
+def _python_manifest_declarations(root: Path) -> tuple[list[Path], dict[Path, set[str]]]:
+    """Collect dependency declarations grouped by each project manifest root."""
+    declarations: dict[Path, set[str]] = {}
+    for path in _find_files(root, "pyproject.toml"):
+        manifest_root = path.parent.resolve()
+        declarations.setdefault(manifest_root, set()).update(
+            normalize_package_name(dep.name) for dep in iter_pyproject_dependencies(path)
+        )
+    for filename in ("requirements.txt", "requirements-dev.txt"):
+        for path in _find_files(root, filename):
+            declarations.setdefault(path.parent.resolve(), set()).update(iter_requirement_names(path))
+    return sorted(declarations), declarations
+
+
+def _nearest_manifest_root(path: Path, roots: list[Path]) -> Path | None:
+    resolved = path.resolve()
+    candidates = [project_root for project_root in roots if project_root in resolved.parents]
+    return max(candidates, key=lambda project_root: len(project_root.parts)) if candidates else None
+
+
+def _local_python_modules(root: Path, paths: list[Path]) -> set[str]:
+    """Find import roots provided by the scanned repository itself."""
+    modules: set[str] = set()
+    for path in paths:
+        try:
+            relative = path.resolve().relative_to(root.resolve())
+        except ValueError:
+            continue
+        parts = relative.parts
+        if not parts:
+            continue
+        modules.add(Path(parts[0]).stem if parts[0].endswith(".py") else parts[0])
+        if len(parts) > 1 and parts[0] == "src":
+            modules.add(parts[1].removesuffix(".py"))
+    return modules
 
 
 def _finding(

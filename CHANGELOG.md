@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Static supply-chain checks now compare runtime Python imports with the nearest `pyproject.toml` or requirements manifest, excluding standard-library, local, and type-checking-only imports.
+
 ## [0.1.4] - 2026-06-12
 
 ### Security
