@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Include root-level Python MCP entrypoints in recursive directory scans instead of silently skipping them when the default `**/*.py` include glob is applied ([#316](https://github.com/MCP-Audit/MCTS/issues/316))
+
 ## [0.1.4] - 2026-06-12
 
 ### Security

@@ -94,9 +94,11 @@ class StaticDiscovery:
         if any(part in self.config.exclude_dirs for part in rel.parts):
             return False
         rel_str = str(rel)
-        if self.config.exclude_globs and any(fnmatch(rel_str, g) for g in self.config.exclude_globs):
+        if self.config.exclude_globs and any(_matches_glob(rel_str, g) for g in self.config.exclude_globs):
             return False
-        if self.config.include_globs and not any(fnmatch(rel_str, g) for g in self.config.include_globs):
+        if self.config.include_globs and not any(
+            _matches_glob(rel_str, g) for g in self.config.include_globs
+        ):
             return False
         try:
             if path.stat().st_size > self.config.max_file_bytes:
@@ -161,6 +163,15 @@ class StaticDiscovery:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == func_name:
                 return ast.get_docstring(node) or ""
         return ""
+
+
+def _matches_glob(relative_path: str, pattern: str) -> bool:
+    """Match a relative path while allowing ``**/`` to match the root level."""
+    normalized_path = relative_path.replace("\\", "/")
+    normalized_pattern = pattern.replace("\\", "/")
+    if fnmatch(normalized_path, normalized_pattern):
+        return True
+    return normalized_pattern.startswith("**/") and fnmatch(normalized_path, normalized_pattern[3:])
 
 
 def _schema_from_function(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, Any]:
