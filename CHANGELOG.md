@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deduplicate repeated analyzer findings by stable root-cause ID when deriving the `mcts pentest` verdict, so duplicate observations no longer inflate v2 risk levels while distinct findings remain counted.
+
 ## [0.1.4] - 2026-06-12
 
 ### Security
